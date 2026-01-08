@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Master | Public</title>
+    
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            /* --- THEME VARIABLES --- */
+            --bg-body: #0f172a; --bg-panel: #1e293b; --bg-input: #334155; --bg-hover: #475569;
+            --text-main: #f8fafc; --text-muted: #94a3b8; --border-color: #334155;
+            --primary: #3b82f6; --primary-text: #ffffff; --danger: #ef4444; --success: #22c55e;
+            --warning: #f59e0b; 
+            --radius: 12px; --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            --resizer-bg: #475569;
+        }
+
+        body.light-mode {
+            --bg-body: #f8fafc; --bg-panel: #ffffff; --bg-input: #f1f5f9; --bg-hover: #e2e8f0;
+            --text-main: #0f172a; --text-muted: #64748b; --border-color: #e2e8f0;
+            --primary: #2563eb; --resizer-bg: #cbd5e1;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg-body); color: var(--text-main);
+            margin: 0; display: flex; height: 100vh; overflow: hidden;
+            transition: background-color 0.4s ease;
+        }
+
+        /* --- LAYOUT --- */
+        .main-container { display: flex; width: 100%; max-width: 100%; margin: 0; padding: 15px; height: 100vh; align-items: stretch; }
+
+        .board-area {
+            flex: 0 0 55%; min-width: 300px; display: flex; justify-content: center; align-items: center; flex-direction: column;
+            padding: 10px; position: relative; z-index: 1; overflow: visible !important; 
+        }
+
+        #board {
+            width: 100%; max-width: 80vh; max-height: 80vh; aspect-ratio: 1/1; 
+            border-radius: 4px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+            transition: box-shadow 0.3s ease; flex-shrink: 0;
+        }
+
+        .chessboard-1.0.0-dragging { 
+            visibility: visible !important; opacity: 1 !important; 
+            z-index: 999999 !important; position: absolute !important; pointer-events: none; 
+        }
+        #board img { opacity: 1 !important; z-index: 100; }
+
+        /* Board Themes */
+        .board-theme-green .white-1e1d7 { background-color: #eeeed2; color: #769656; } .board-theme-green .black-3c85d { background-color: #769656; color: #eeeed2; }
+        .board-theme-brown .white-1e1d7 { background-color: #f0d9b5; color: #b58863; } .board-theme-brown .black-3c85d { background-color: #b58863; color: #f0d9b5; }
+        .board-theme-blue .white-1e1d7 { background-color: #dee3e6; color: #8ca2ad; } .board-theme-blue .black-3c85d { background-color: #8ca2ad; color: #dee3e6; }
+        .board-theme-gray .white-1e1d7 { background-color: #e0e0e0; color: #a0a0a0; } .board-theme-gray .black-3c85d { background-color: #707070; color: #e0e0e0; }
+        .board-theme-purple .white-1e1d7 { background-color: #e2e8f0; color: #8b5cf6; } .board-theme-purple .black-3c85d { background-color: #8b5cf6; color: #e2e8f0; }
+        .board-theme-teal .white-1e1d7 { background-color: #ccfbf1; color: #0d9488; } .board-theme-teal .black-3c85d { background-color: #0d9488; color: #ccfbf1; }
+        .highlight-square { box-shadow: inset 0 0 0 4px var(--highlight-last); }
+
+        .resizer {
+            width: 12px; cursor: col-resize; background-color: transparent; display: flex; justify-content: center; align-items: center;
+            transition: background-color 0.2s; margin: 0 4px; border-radius: 6px; flex-shrink: 0; z-index: 10;
+        }
+        .resizer::after { content: ""; width: 4px; height: 40px; background-color: var(--resizer-bg); border-radius: 2px; transition: height 0.2s, background-color 0.2s; }
+        .resizer:hover, .resizer.dragging { background-color: var(--bg-hover); }
+        .resizer:hover::after, .resizer.dragging::after { height: 100%; background-color: var(--primary); }
+
+        .controls-area {
+            flex: 1; min-width: 350px; background-color: var(--bg-panel); border-radius: var(--radius);
+            box-shadow: var(--shadow); display: flex; flex-direction: column; height: 100%; overflow: hidden;
+        }
+        .header-row {
+            display: flex; justify-content: space-between; align-items: center; padding: 20px 25px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+        }
+        h2 { margin: 0; font-size: 1.1rem; font-weight: 700; display: flex; align-items: center; gap: 10px; color: var(--text-main); letter-spacing: -0.5px; }
+        h2 i { color: var(--primary); }
+        .settings-btn { background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; transition: 0.3s; }
+        .settings-btn:hover { color: var(--text-main); transform: rotate(90deg); }
+
+        #view-mode, #settings-mode, #add-mode, #selection-mode, #train-mode { display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 25px; }
+        .scrollable-list, .settings-container, #selection-list { flex-grow: 1; overflow-y: auto; min-height: 0; padding-right: 8px; margin-bottom: 20px; }
+        
+        .action-group { margin-top: auto; flex-shrink: 0; display: flex; gap: 12px; flex-wrap: wrap; }
+
+        /* TRAINING UI */
+        .training-dashboard { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; padding-bottom: 20px; width: 100%; }
+        .training-card { background: var(--bg-input); border-radius: var(--radius); padding: 25px; width: 100%; text-align: center; box-shadow: var(--shadow); border: 1px solid var(--border-color); }
+        .category-label { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 10px; font-weight: 600; }
+        .active-category-title { font-size: 1.4rem; font-weight: 700; color: var(--text-main); margin: 0 0 20px 0; }
+        .progress-container { width: 100%; height: 8px; background: var(--bg-panel); border-radius: 4px; overflow: hidden; margin-bottom: 25px; }
+        .progress-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.5s ease; }
+        .progress-text { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 5px; display: flex; justify-content: space-between; }
+        
+        .status-badge { display: inline-block; padding: 12px 24px; border-radius: 30px; font-size: 1.5rem; font-weight: 800; background: var(--bg-panel); color: var(--text-main); border: 2px solid var(--border-color); transition: all 0.3s; }
+        .status-badge.success { background: rgba(34, 197, 94, 0.2); color: var(--success); border-color: var(--success); }
+        .status-badge.error { background: rgba(239, 68, 68, 0.2); color: var(--danger); border-color: var(--danger); animation: shake 0.4s; }
+        .status-badge.neutral { background: var(--bg-input); color: var(--primary); border-color: var(--primary); }
+        @keyframes shake { 10%, 90% { transform: translate3d(-2px, 0, 0); } 20%, 80% { transform: translate3d(4px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-6px, 0, 0); } 40%, 60% { transform: translate3d(6px, 0, 0); } }
+
+        .training-note { 
+            background: var(--bg-panel); border-left: 6px solid var(--primary); 
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2); 
+            padding: 20px; margin-top: 25px; border-radius: var(--radius);
+            color: var(--text-main); width: 100%; max-width: 800px; 
+            display: none; font-size: 1.1rem; line-height: 1.6; 
+            flex-direction: column; gap: 15px; position: relative; z-index: 10;
+        }
+        .note-content { display: flex; align-items: flex-start; gap: 15px; }
+        .note-content i { color: var(--primary); margin-top: 4px; font-size: 1.3rem; }
+        .continue-btn { align-self: flex-end; background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: var(--radius); font-weight: 600; cursor: pointer; font-size: 0.95rem; display: flex; align-items: center; gap: 8px; transition: 0.2s; }
+        .continue-btn:hover { background: #2563eb; transform: translateY(-1px); }
+
+        /* LISTS */
+        .category-group { margin-bottom: 8px; }
+        .category-header { font-size: 0.9rem; font-weight: 600; color: var(--text-main); margin-bottom: 2px; display: flex; align-items: center; justify-content: space-between; padding: 12px 10px; border-radius: var(--radius); cursor: pointer; transition: background 0.2s; }
+        .category-header:hover { background: var(--bg-hover); }
+        .category-header i.fa-chevron-right { color: var(--text-muted); font-size: 0.8rem; margin-right: 12px; transition: transform 0.2s; }
+        .category-header.expanded i.fa-chevron-right { transform: rotate(90deg); color: var(--text-main); }
+        .category-header.special-cat { border-left: 4px solid var(--warning); background: rgba(245, 158, 11, 0.1); }
+        .category-header.special-cat span { color: var(--warning); }
+        .category-content { display: none; padding-left: 12px; margin-top: 2px; }
+        .category-content.expanded { display: block; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        .line-item { background: transparent; padding: 12px; border-radius: var(--radius); cursor: pointer; display: flex; justify-content: space-between; align-items: flex-start; font-size: 0.95rem; transition: all 0.2s ease; margin-bottom: 2px; }
+        .line-item:hover { background: var(--bg-input); }
+        .line-item.in-repetition { background: rgba(245, 158, 11, 0.08); }
+        
+        /* FIX: 100% Breite für Text */
+        .line-item > span:first-child { 
+            flex: 1 1 auto; /* Nimmt alles */
+            min-width: 0; /* Erlaubt Schrumpfen, verhindert Overflow */
+            white-space: normal; 
+            word-break: break-word; 
+            line-height: 1.5; 
+            padding-right: 10px; 
+        }
+        .line-actions { flex: 0 0 auto; display: flex; gap: 5px; opacity: 0; transition: 0.2s; }
+
+        .line-item input[type="checkbox"] { accent-color: var(--primary); transform: scale(1.3); margin-right: 15px; cursor: pointer; margin-top: 3px; flex-shrink: 0; }
+        
+        .cat-actions { opacity: 0; transition: opacity 0.2s ease; display: flex; gap: 5px; flex-shrink: 0; }
+        .category-header:hover .cat-actions, .line-item:hover .line-actions { opacity: 1; }
+        @media (hover: none) { .cat-actions, .line-actions { opacity: 1; } }
+        .cat-actions button, .line-actions button { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 6px; border-radius: 4px; font-size: 0.9rem; transition: 0.2s; }
+        .cat-actions button:hover, .line-actions button:hover { color: var(--primary); background: var(--bg-input); }
+        .cat-actions button.del:hover, .line-actions button.del:hover { color: var(--danger); }
+        .line-actions button.toggle-rep:hover { color: var(--warning); }
+
+        /* BUTTONS & INPUTS */
+        .action-btn { background-color: var(--text-main); color: var(--bg-body); border: none; padding: 14px 24px; border-radius: var(--radius); font-weight: 700; cursor: pointer; flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-size: 1rem; }
+        .action-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .action-btn.secondary { background-color: var(--bg-input); color: var(--text-main); }
+        .action-btn.secondary:hover { background-color: var(--bg-hover); }
+        
+        .action-btn.repetition { background-color: transparent; border: 2px solid var(--warning); color: var(--warning); width: 100%; flex: 1 1 100%; order: -1; opacity: 0.8; }
+        .action-btn.repetition:hover, .action-btn.repetition:active { opacity: 1; background: var(--warning); color: #000; }
+        
+        .action-btn.remove-repetition { background-color: transparent; border: 2px solid var(--success); color: var(--success); width: 100%; flex: 1 1 100%; order: -1; }
+        .action-btn.remove-repetition:hover { background: var(--success); color: #fff; }
+
+        input[type="text"], input[type="search"], textarea.note-input { width: 100%; padding: 14px; margin-bottom: 12px; background: var(--bg-input); border: 2px solid transparent; color: var(--text-main); border-radius: var(--radius); font-size: 1rem; transition: 0.2s; flex-shrink: 0; font-family: inherit; }
+        input:focus, textarea:focus { outline: none; background: var(--bg-panel); border-color: var(--primary); }
+        textarea.note-input { height: 100px; resize: none; margin-top: 5px; }
+
+        .settings-section { margin-bottom: 30px; }
+        .settings-label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 12px; color: var(--text-muted); }
+        .options-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .options-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        .option-card { background: var(--bg-input); border: 2px solid transparent; padding: 15px; border-radius: var(--radius); cursor: pointer; text-align: center; font-size: 0.9rem; font-weight: 500; color: var(--text-main); transition: 0.2s; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .option-card:hover { background: var(--bg-hover); } .option-card.selected { border-color: var(--primary); color: var(--primary); background: var(--bg-panel); }
+        .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border-color); cursor: pointer; }
+        .toggle-switch { width: 44px; height: 24px; background: var(--bg-input); border-radius: 12px; position: relative; transition: 0.3s; }
+        .toggle-switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 20px; height: 20px; background: #fff; border-radius: 50%; transition: 0.3s; }
+        .toggle-row.active .toggle-switch { background: var(--primary); } .toggle-row.active .toggle-switch::after { left: 22px; }
+        .color-dot { width: 20px; height: 20px; border-radius: 50%; display: inline-block; }
+        .color-switch { display: flex; background: var(--bg-input); border-radius: var(--radius); padding: 4px; margin-bottom: 20px; flex-shrink: 0; }
+        .color-btn { flex: 1; background: transparent; border: none; color: var(--text-muted); padding: 10px; cursor: pointer; font-weight: 600; border-radius: 6px; font-size: 0.95rem; }
+        .color-btn.active { background-color: var(--bg-panel); color: var(--text-main); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .search-banner { background: var(--bg-input); padding: 12px 15px; border-radius: var(--radius); margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; color: var(--text-main); font-size: 0.95rem; flex-shrink: 0;}
+        .search-banner button { background: none; border: none; color: var(--text-muted); font-weight: 600; cursor: pointer; }
+        .search-banner button:hover { color: var(--danger); }
+        ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--bg-input); border-radius: 4px; } ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="" onmousedown="initAudio()">
+
+<div class="main-container" id="main-container">
+    <div class="board-area" id="board-area">
+        <div id="board" class="board-theme-green"></div>
+        <div id="training-note-display" class="training-note">
+            <div class="note-content">
+                <i class="fas fa-info-circle"></i>
+                <span id="note-text" style="flex:1;"></span>
+            </div>
+            <button class="continue-btn" onclick="continueFromNote()">Weiter</button>
+        </div>
+    </div>
+
+    <div class="resizer" id="resizer"></div>
+
+    <div class="controls-area" id="controls-area">
+        <div class="header-row">
+            <h2><i class="fas fa-chess-knight"></i> Trainer</h2>
+            <button class="settings-btn" onclick="openSettings()" title="Einstellungen"><i class="fas fa-gear"></i></button>
+        </div>
+
+        <div id="view-mode">
+            <div class="color-switch">
+                <button class="color-btn active" onclick="setSide('white')">Weiß</button>
+                <button class="color-btn" onclick="setSide('black')">Schwarz</button>
+            </div>
+            <div id="search-active-banner" class="search-banner hidden">
+                <span><i class="fas fa-filter" style="margin-right:8px; color:var(--primary)"></i> Filter aktiv</span>
+                <button onclick="resetBoardSearch()">Reset</button>
+            </div>
+            <div id="lines-list" class="scrollable-list"></div>
+            <div class="action-group">
+                <button class="action-btn" onclick="startAddingLine()"><i class="fas fa-plus"></i> Neu</button>
+                <button class="action-btn secondary" onclick="openSelectionMode()"><i class="fas fa-play"></i> Üben</button>
+            </div>
+        </div>
+
+        <div id="settings-mode" class="hidden">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-shrink: 0;">
+                <h2 style="font-size:1.1rem; margin:0;">Einstellungen</h2>
+                <button class="settings-btn" onclick="closeSettings()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="settings-container">
+                <div class="settings-section">
+                    <span class="settings-label">Datenverwaltung (Speichern & Laden)</span>
+                    <div style="background: var(--bg-input); padding: 15px; border-radius: var(--radius); text-align: center;">
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 15px;">
+                            Deine Daten werden automatisch in diesem Browser gespeichert. 
+                            Um sie auf ein anderes Gerät zu übertragen, nutze diese Buttons:
+                        </p>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="action-btn secondary" onclick="exportData()"><i class="fas fa-download"></i> Backup speichern</button>
+                            <button class="action-btn secondary" onclick="document.getElementById('import-file').click()"><i class="fas fa-upload"></i> Backup laden</button>
+                            <input type="file" id="import-file" style="display: none;" onchange="importData(this)">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <span class="settings-label">Darstellung</span>
+                    <div class="toggle-row" onclick="toggleThemeSetting()" id="setting-theme-row"><span>Dark Mode</span><div class="toggle-switch"></div></div>
+                </div>
+                <div class="settings-section">
+                    <span class="settings-label">Gameplay</span>
+                    <div class="toggle-row" onclick="toggleSetting('sound')" id="setting-sound-row"><span>Soundeffekte</span><div class="toggle-switch"></div></div>
+                    <div class="toggle-row" onclick="toggleSetting('coords')" id="setting-coords-row"><span>Koordinaten</span><div class="toggle-switch"></div></div>
+                    <div class="toggle-row" onclick="toggleSetting('highlight')" id="setting-highlight-row"><span>Zug hervorheben</span><div class="toggle-switch"></div></div>
+                    <div class="toggle-row" onclick="toggleSetting('autoRepeat')" id="setting-autorepeat-row"><span>Auto-Wiederholung bei Fehler</span><div class="toggle-switch"></div></div>
+                </div>
+                <div class="settings-section">
+                    <span class="settings-label">Animationen</span>
+                    <div class="options-grid">
+                        <div class="option-card" onclick="setAnimSpeed(300)" id="opt-anim-300">Slow</div>
+                        <div class="option-card" onclick="setAnimSpeed(200)" id="opt-anim-200">Normal</div>
+                        <div class="option-card" onclick="setAnimSpeed(0)" id="opt-anim-0">Aus</div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <span class="settings-label">Brett Design</span>
+                    <div class="options-grid">
+                        <div class="option-card" onclick="setBoardColor('green')" id="opt-board-green"><span class="color-dot" style="background:#769656;"></span></div>
+                        <div class="option-card" onclick="setBoardColor('brown')" id="opt-board-brown"><span class="color-dot" style="background:#b58863;"></span></div>
+                        <div class="option-card" onclick="setBoardColor('blue')" id="opt-board-blue"><span class="color-dot" style="background:#8ca2ad;"></span></div>
+                        <div class="option-card" onclick="setBoardColor('gray')" id="opt-board-gray"><span class="color-dot" style="background:#707070;"></span></div>
+                        <div class="option-card" onclick="setBoardColor('purple')" id="opt-board-purple"><span class="color-dot" style="background:#8b5cf6;"></span></div>
+                        <div class="option-card" onclick="setBoardColor('teal')" id="opt-board-teal"><span class="color-dot" style="background:#0d9488;"></span></div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <span class="settings-label">Figuren</span>
+                    <div class="options-grid-2">
+                        <div class="option-card" onclick="setPieceTheme('wikipedia')" id="opt-piece-wikipedia">Standard</div>
+                        <div class="option-card" onclick="setPieceTheme('alpha')" id="opt-piece-alpha">Alpha</div>
+                        <div class="option-card" onclick="setPieceTheme('uscf')" id="opt-piece-uscf">USCF</div>
+                        <div class="option-card" onclick="setPieceTheme('merida')" id="opt-piece-merida">Merida</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="add-mode" class="hidden">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-shrink:0;">
+                <h2 style="margin:0; font-size:1.1rem;">Neue Variante</h2>
+            </div>
+            <input type="text" id="category-input" list="category-datalist" placeholder="Kategorie (z.B. Sizilianisch)...">
+            <datalist id="category-datalist"></datalist>
+            <textarea id="move-note-input" class="note-input" placeholder="Notiz zu dieser Stellung..."></textarea>
+            <div style="font-size:0.9rem; color:var(--text-muted); margin: 10px 0;"><i class="fas fa-info-circle"></i> Züge auf dem Brett ausführen</div>
+            <div id="pgn-display" style="background: var(--bg-input); padding:15px; border-radius:var(--radius); font-family:monospace; margin-bottom:15px; flex-grow:1; overflow-y:auto; font-size:0.9rem; color:var(--text-main); min-height: 60px;"></div>
+            <div class="action-group">
+                <button class="action-btn" onclick="saveLine()" id="save-btn">Speichern</button>
+                <button class="action-btn secondary" onclick="cancelAdd()">Abbrechen</button>
+            </div>
+        </div>
+
+        <div id="selection-mode" class="hidden">
+            <h2 style="font-size:1.1rem; margin-bottom:15px; flex-shrink:0;">Training Auswahl</h2>
+            <input type="search" id="search-input" placeholder="Suche..." oninput="renderSelectionList()">
+            <div id="selection-list" class="scrollable-list"></div>
+            <div class="action-group">
+                <button class="action-btn" onclick="startTrainingFromSelection()">Starten</button>
+                <button class="action-btn secondary" onclick="switchUI('view-mode')">Zurück</button>
+            </div>
+        </div>
+
+        <div id="train-mode" class="hidden">
+            <div class="training-dashboard">
+                <div class="training-card">
+                    <div class="progress-text">
+                        <span id="progress-text-left">Fortschritt</span>
+                        <span id="progress-text-right">0 / 0</span>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+
+                    <div class="category-label">Aktuelle Variante</div>
+                    <div class="active-category-title" id="train-category-display"></div>
+                    
+                    <div class="status-badge neutral" id="train-status">Du bist dran</div>
+                </div>
+            </div>
+            
+            <div class="action-group">
+                <button class="action-btn repetition" id="train-toggle-btn" onclick="toggleRepetitionStatus()">
+                    <i class="fas fa-bookmark"></i> Wiederholung
+                </button>
+                
+                <button class="action-btn secondary" onclick="repeatLater()">Später</button>
+                <button class="action-btn secondary" onclick="stopTraining()" style="color:var(--danger);">Beenden</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- RESIZER LOGIC ---
+    const resizer = document.getElementById('resizer');
+    const boardArea = document.getElementById('board-area');
+    const container = document.getElementById('main-container');
+    let isResizing = false;
+    resizer.addEventListener('mousedown', (e) => { isResizing = true; document.body.style.cursor = 'col-resize'; resizer.classList.add('dragging'); e.preventDefault(); });
+    document.addEventListener('mousemove', (e) => { if (!isResizing) return; const containerWidth = container.getBoundingClientRect().width; let newFlex = (e.clientX / containerWidth) * 100; if(newFlex < 30) newFlex = 30; if(newFlex > 70) newFlex = 70; boardArea.style.flex = `0 0 ${newFlex}%`; if(board) board.resize(); });
+    document.addEventListener('mouseup', () => { if(isResizing) { isResizing = false; document.body.style.cursor = ''; resizer.classList.remove('dragging'); if(board) board.resize(); } });
+
+    // --- AUDIO ---
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioContext();
+    function initAudio() { if (audioCtx.state === 'suspended') { audioCtx.resume(); } }
+
+    function playSound(type) {
+        if(!userSettings.sound) return;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator(); const gainNode = audioCtx.createGain(); osc.connect(gainNode); gainNode.connect(audioCtx.destination);
+        if (type === 'move') { osc.type = 'sine'; osc.frequency.setValueAtTime(300, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.05); gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime); gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05); osc.start(); osc.stop(audioCtx.currentTime + 0.05); } 
+        else if (type === 'capture') { osc.type = 'triangle'; osc.frequency.setValueAtTime(440, audioCtx.currentTime); gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime); gainNode.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3); osc.start(); osc.stop(audioCtx.currentTime + 0.3); } 
+        else if (type === 'error') { osc.type = 'sine'; osc.frequency.setValueAtTime(150, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.2); gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime); gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2); osc.start(); osc.stop(audioCtx.currentTime + 0.2); }
+    }
+
+    let userSettings = JSON.parse(localStorage.getItem('chessSettingsPro')) || { theme: 'dark', sound: true, coords: true, highlight: true, autoRepeat: false, animSpeed: 200, boardColor: 'green', pieceStyle: 'wikipedia' };
+    let expandedCategories = {}; 
+    let isPaused = false; 
+    let pendingNextAction = null; 
+    let totalTrainingLines = 0;
+    const REPETITION_CAT = "Wiederholung"; 
+
+    function updateSettingsUI() {
+        document.getElementById('setting-theme-row').classList.toggle('active', userSettings.theme === 'dark'); 
+        document.getElementById('setting-sound-row').classList.toggle('active', userSettings.sound);
+        document.getElementById('setting-coords-row').classList.toggle('active', userSettings.coords);
+        document.getElementById('setting-highlight-row').classList.toggle('active', userSettings.highlight);
+        document.getElementById('setting-autorepeat-row').classList.toggle('active', userSettings.autoRepeat);
+        document.querySelectorAll('.option-card').forEach(el => el.classList.remove('selected'));
+        if(document.getElementById(`opt-anim-${userSettings.animSpeed}`)) document.getElementById(`opt-anim-${userSettings.animSpeed}`).classList.add('selected');
+        if(document.getElementById(`opt-board-${userSettings.boardColor}`)) document.getElementById(`opt-board-${userSettings.boardColor}`).classList.add('selected');
+        if(document.getElementById(`opt-piece-${userSettings.pieceStyle}`)) document.getElementById(`opt-piece-${userSettings.pieceStyle}`).classList.add('selected');
+    }
+    function applySettings() {
+        if (userSettings.theme === 'light') document.body.classList.add('light-mode'); else document.body.classList.remove('light-mode');
+        document.getElementById('board').className = `board-theme-${userSettings.boardColor}`;
+        if(board) initBoard();
+        updateSettingsUI();
+    }
+    function toggleSetting(key) { userSettings[key] = !userSettings[key]; saveSettings(); applySettings(); }
+    function toggleThemeSetting() { userSettings.theme = userSettings.theme === 'light' ? 'dark' : 'light'; saveSettings(); applySettings(); }
+    function setAnimSpeed(speed) { userSettings.animSpeed = speed; saveSettings(); applySettings(); }
+    function setBoardColor(c) { userSettings.boardColor = c; saveSettings(); applySettings(); }
+    function setPieceTheme(s) { userSettings.pieceStyle = s; saveSettings(); applySettings(); }
+    function saveSettings() { localStorage.setItem('chessSettingsPro', JSON.stringify(userSettings)); }
+    function openSettings() { switchUI('settings-mode'); updateSettingsUI(); }
+    function closeSettings() { switchUI('view-mode'); }
+
+    let board = null; let game = new Chess(); let currentSide = 'white';
+    function pieceThemeUrl(piece) {
+        const style = userSettings.pieceStyle || 'wikipedia';
+        const base = 'https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/';
+        if (style === 'wikipedia') return 'https://chessboardjs.com/img/chesspieces/wikipedia/' + piece + '.png';
+        if (style === 'alpha') return base + 'alpha/' + piece + '.svg';
+        if (style === 'uscf') return base + 'california/' + piece + '.svg';
+        if (style === 'merida') return base + 'merida/' + piece + '.svg';
+    }
+    function highlightLastMove(move) {
+        if(!userSettings.highlight) return;
+        $('#board .square-55d63').removeClass('highlight-square');
+        if(move) { $('#board .square-' + move.from).addClass('highlight-square'); $('#board .square-' + move.to).addClass('highlight-square'); }
+    }
+    function initBoard() {
+        const config = { draggable: true, position: game.fen(), onDragStart: onDragStart, onDrop: onDrop, onSnapEnd: onSnapEnd, pieceTheme: pieceThemeUrl, moveSpeed: userSettings.animSpeed, snapSpeed: userSettings.animSpeed, showNotation: userSettings.coords, orientation: currentSide };
+        if(board) board.destroy(); $('#board').empty(); board = Chessboard('board', config);
+        const history = game.history({verbose:true}); if(history.length > 0) highlightLastMove(history[history.length-1]);
+        setTimeout(() => board.resize(), 100);
+    }
+
+    let mode = 'view'; let editingId = null; let repertoire = JSON.parse(localStorage.getItem('chessRepertoire_v3')) || { white: [], black: [] };
+    let currentComments = {}; let trainingQueue = []; let currentTrainLine = null; let currentMoveIndex = 0;
+
+    function getCleanFen() { return game.fen().split(' ').slice(0, 4).join(' '); }
+    function onDragStart (source, piece) { if (isPaused) return false; if (game.game_over()) return false; if (mode === 'train') { if ((game.turn() === 'w' && currentSide === 'black') || (game.turn() === 'b' && currentSide === 'white')) return false; } return true; }
+    function onDrop (source, target) {
+        let moveObj = { from: source, to: target, promotion: 'q' }; let move = game.move(moveObj);
+        if (move === null) return 'snapback';
+        if(move.captured) playSound('capture'); else playSound('move'); highlightLastMove(move);
+        if (mode === 'add') { updatePgnDisplay(); loadNoteForCurrentPos(); } else if (mode === 'train') { handleTrainingMove(move); } else if (mode === 'view') { updateViewSearch(); }
+    }
+    function onSnapEnd () { board.position(game.fen()); }
+    
+    function updateViewSearch() { const currentPgn = game.pgn(); if (!currentPgn) { resetBoardSearch(); return; } document.getElementById('search-active-banner').classList.remove('hidden'); renderList(currentPgn); }
+    function resetBoardSearch() { game.reset(); board.position(game.fen()); $('#board .square-55d63').removeClass('highlight-square'); document.getElementById('search-active-banner').classList.add('hidden'); renderList(null); }
+    function getGroupedLines(side, filterPgn = null) { const groups = {}; repertoire[side].forEach(line => { if (filterPgn && !line.pgn.startsWith(filterPgn)) return; const cat = line.category || 'Allgemein'; if (!groups[cat]) groups[cat] = []; groups[cat].push(line); }); return groups; }
+    function setSide(color) { currentSide = color; $('.color-btn').removeClass('active'); $(`.color-btn:contains('${color === 'white' ? 'Weiß' : 'Schwarz'}')`).addClass('active'); board.orientation(color); resetBoardSearch(); }
+
+    function toggleCategory(catEscaped) {
+        if (expandedCategories[catEscaped]) delete expandedCategories[catEscaped];
+        else expandedCategories[catEscaped] = true;
+        renderList(game.pgn());
+    }
+
+    // --- IMPORT / EXPORT (BACKUP) ---
+    function exportData() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(repertoire));
+        const downloadAnchorNode = document.createElement('a');
+        downloadAnchorNode.setAttribute("href", dataStr);
+        downloadAnchorNode.setAttribute("download", "chess_repertoire_" + new Date().toISOString().slice(0,10) + ".json");
+        document.body.appendChild(downloadAnchorNode); downloadAnchorNode.click(); downloadAnchorNode.remove();
+    }
+    function importData(input) {
+        const file = input.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const newRepertoire = JSON.parse(e.target.result);
+                if (newRepertoire.white && newRepertoire.black) {
+                    if(confirm("Warnung: Deine aktuellen Daten werden überschrieben. Fortfahren?")) { repertoire = newRepertoire; saveData(); renderList(); alert("Daten erfolgreich geladen!"); }
+                } else { alert("Ungültige Datei."); }
+            } catch (err) { alert("Fehler beim Lesen der Datei."); }
+        };
+        reader.readAsText(file);
+    }
+
+    // --- REPETITION LOGIC ---
+    function updateRepetitionButtonState() {
+        const btnFooter = document.getElementById('train-toggle-btn');
+        if (!currentTrainLine || !btnFooter) return;
+        
+        const exists = repertoire[currentSide].some(l => l.pgn === currentTrainLine.pgn && l.category === REPETITION_CAT);
+        
+        if (exists) {
+            btnFooter.innerHTML = '<i class="fas fa-check-circle"></i> Gemeistert (Entfernen)';
+            btnFooter.className = 'action-btn remove-repetition';
+        } else {
+            btnFooter.innerHTML = '<i class="fas fa-bookmark"></i> Wiederholung';
+            btnFooter.className = 'action-btn repetition';
+        }
+    }
+
+    function toggleRepetitionStatus() {
+        const exists = repertoire[currentSide].some(l => l.pgn === currentTrainLine.pgn && l.category === REPETITION_CAT);
+        
+        if (exists) {
+            repertoire[currentSide] = repertoire[currentSide].filter(l => !(l.pgn === currentTrainLine.pgn && l.category === REPETITION_CAT));
+            saveData();
+            updateRepetitionButtonState();
+        } else {
+            const newLine = JSON.parse(JSON.stringify(currentTrainLine));
+            newLine.id = Date.now();
+            newLine.category = REPETITION_CAT;
+            repertoire[currentSide].unshift(newLine);
+            saveData();
+            updateRepetitionButtonState();
+        }
+    }
+    
+    function toggleRepetitionFromList(id) {
+        const line = repertoire[currentSide].find(l => l.id === id);
+        if (!line) return;
+        const repIndex = repertoire[currentSide].findIndex(l => l.pgn === line.pgn && l.category === REPETITION_CAT);
+        if (repIndex !== -1) { repertoire[currentSide].splice(repIndex, 1); } 
+        else { const newLine = JSON.parse(JSON.stringify(line)); newLine.id = Date.now(); newLine.category = REPETITION_CAT; repertoire[currentSide].unshift(newLine); }
+        saveData(); renderList(game.pgn());
+    }
+
+    function addToRepetition(line) {
+        const alreadyExists = repertoire[currentSide].some(l => l.pgn === line.pgn && l.category === REPETITION_CAT);
+        if (!alreadyExists) {
+            const newLine = JSON.parse(JSON.stringify(line)); newLine.id = Date.now(); newLine.category = REPETITION_CAT;
+            repertoire[currentSide].unshift(newLine); saveData();
+            updateRepetitionButtonState();
+        }
+    }
+
+    function renderList(filterPgn = null) {
+        const list = document.getElementById('lines-list'); list.innerHTML = '';
+        const groups = getGroupedLines(currentSide, filterPgn);
+        const repetitionLines = repertoire[currentSide].filter(l => l.category === REPETITION_CAT);
+        const repetitionPgns = new Set(repetitionLines.map(l => l.pgn));
+        const categories = Object.keys(groups).sort((a,b) => { if(a === REPETITION_CAT) return -1; if(b === REPETITION_CAT) return 1; return a.localeCompare(b); });
+        
+        if (categories.length === 0) { list.innerHTML = `<div style="text-align:center; color:var(--text-muted); padding:20px;">Leer.</div>`; return; }
+        
+        categories.forEach(cat => {
+            const catEscaped = cat.replace(/'/g, "\\'"); 
+            const isExpanded = expandedCategories[cat]; 
+            const arrowClass = isExpanded ? 'expanded' : ''; 
+            const contentClass = isExpanded ? 'expanded' : '';
+            const specialClass = (cat === REPETITION_CAT) ? 'special-cat' : '';
+
+            const groupDiv = document.createElement('div'); groupDiv.className = 'category-group';
+            groupDiv.innerHTML = `
+                <div class="category-header ${arrowClass} ${specialClass}" onclick="toggleCategory('${catEscaped}')">
+                    <div style="display:flex; align-items:center;"><i class="fas fa-chevron-right"></i><span>${cat}</span></div>
+                    <div class="cat-actions" onclick="event.stopPropagation()"><button onclick="startAddingLine('${catEscaped}')"><i class="fas fa-plus"></i></button><button onclick="renameCategory('${catEscaped}')"><i class="fas fa-pen"></i></button><button class="del" onclick="deleteCategory('${catEscaped}')"><i class="fas fa-trash"></i></button></div>
+                </div>`;
+            const contentDiv = document.createElement('div'); contentDiv.className = `category-content ${contentClass}`;
+            
+            groups[cat].forEach(line => {
+                const div = document.createElement('div'); 
+                const isInRepetition = cat !== REPETITION_CAT && repetitionPgns.has(line.pgn);
+                const repetitionClass = isInRepetition ? 'in-repetition' : '';
+                div.className = `line-item ${repetitionClass}`;
+                div.innerHTML = `
+                    <span onclick="loadLinePreview(${line.id})">${line.pgn}</span>
+                    <div class="line-actions">
+                        <button onclick="toggleRepetitionFromList(${line.id})" class="toggle-rep" title="${isInRepetition ? 'Aus Wiederholung entfernen' : 'Zur Wiederholung hinzufügen'}">
+                            <i class="${isInRepetition ? 'fas' : 'far'} fa-bookmark" style="${isInRepetition ? 'color:var(--warning)' : ''}"></i>
+                        </button>
+                        <button onclick="editLine(${line.id})"><i class="fas fa-pen"></i></button>
+                        <button class="del" onclick="deleteLine(${line.id})"><i class="fas fa-trash"></i></button>
+                    </div>`;
+                contentDiv.appendChild(div);
+            });
+            groupDiv.appendChild(contentDiv); list.appendChild(groupDiv);
+        });
+    }
+
+    function renameCategory(oldName) { const newName = prompt("Neuer Name:", oldName); if (newName && newName.trim() !== "" && newName !== oldName) { repertoire[currentSide].forEach(line => { if (line.category === oldName) line.category = newName.trim(); }); saveData(); renderList(game.pgn()); } }
+    function deleteCategory(catName) { if(confirm(`"${catName}" löschen?`)) { repertoire[currentSide] = repertoire[currentSide].filter(line => line.category !== catName); saveData(); renderList(game.pgn()); } }
+    function loadLinePreview(id) { const line = repertoire[currentSide].find(l => l.id === id); if(line) { game.load_pgn(line.pgn); board.position(game.fen()); const history = game.history({verbose:true}); if(history.length) highlightLastMove(history[history.length-1]); updateViewSearch(); } }
+    function deleteLine(id) { if(confirm('Löschen?')) { repertoire[currentSide] = repertoire[currentSide].filter(l => l.id !== id); saveData(); renderList(game.pgn()); } }
+    function startAddingLine(preselectedCat) { resetBoardSearch(); editingId = null; let cat = (typeof preselectedCat === 'string') ? preselectedCat : ""; prepareEditor("Neue Variante", "", cat, {}); }
+    function editLine(id) { const line = repertoire[currentSide].find(l => l.id === id); if (!line) return; editingId = id; prepareEditor("Bearbeiten", line.pgn, line.category, line.comments || {}); }
+    function prepareEditor(title, pgn, category, commentsData) { mode = 'add'; switchUI('add-mode'); document.getElementById('category-input').value = category; currentComments = JSON.parse(JSON.stringify(commentsData)); const datalist = document.getElementById('category-datalist'); datalist.innerHTML = ''; Object.keys(getGroupedLines(currentSide)).forEach(cat => { const opt = document.createElement('option'); opt.value = cat; datalist.appendChild(opt); }); game.reset(); if (pgn) game.load_pgn(pgn); board.position(game.fen()); board.orientation(currentSide); const history = game.history({verbose:true}); if(history.length) highlightLastMove(history[history.length-1]); else $('#board .square-55d63').removeClass('highlight-square'); updatePgnDisplay(); loadNoteForCurrentPos(); }
+    function updatePgnDisplay() { const pgnEl = document.getElementById('pgn-display'); pgnEl.innerText = game.pgn() || "Züge spielen..."; pgnEl.scrollTop = pgnEl.scrollHeight; }
+    function saveLine() { const pgn = game.pgn(); if (pgn.trim() === '') { alert("Keine Züge."); return; } const catInput = document.getElementById('category-input').value.trim(); const category = catInput || "Allgemein"; const moves = game.history({ verbose: true }); const lineData = { id: editingId || Date.now(), pgn, category, moves, comments: currentComments }; if (editingId) { const index = repertoire[currentSide].findIndex(l => l.id === editingId); if (index !== -1) repertoire[currentSide][index] = lineData; } else repertoire[currentSide].push(lineData); saveData(); cancelAdd(); }
+    function cancelAdd() { mode = 'view'; editingId = null; currentComments = {}; switchUI('view-mode'); resetBoardSearch(); }
+    function openSelectionMode() { if (repertoire[currentSide].length === 0) { alert("Nichts zum Üben."); return; } mode = 'selection'; switchUI('selection-mode'); renderSelectionList(); }
+    
+    function renderSelectionList() {
+        const list = document.getElementById('selection-list'); list.innerHTML = '';
+        const groups = getGroupedLines(currentSide);
+        const term = document.getElementById('search-input').value.toLowerCase();
+        Object.keys(groups).sort().forEach(cat => {
+            const lines = groups[cat].filter(l => l.pgn.toLowerCase().includes(term) || cat.toLowerCase().includes(term));
+            if (lines.length > 0) {
+                const catClean = cat.replace(/[^a-zA-Z0-9]/g, '_');
+                const header = document.createElement('div'); header.className = 'category-header'; 
+                header.innerHTML = `<div style="display:flex; align-items:center; gap:10px;"><input type="checkbox" checked onchange="toggleAllSelection(this, '${catClean}')" onclick="event.stopPropagation()"><span>${cat}</span></div>`;
+                list.appendChild(header);
+                const contentDiv = document.createElement('div'); contentDiv.style.paddingLeft = "15px";
+                lines.forEach(l => {
+                    const div = document.createElement('label'); div.className = 'line-item'; 
+                    div.innerHTML = `<div style="display:flex; align-items:center;"><input type="checkbox" value="${l.id}" checked class="chk-${catClean}"> <span>${l.pgn}</span></div>`; 
+                    contentDiv.appendChild(div);
+                });
+                list.appendChild(contentDiv);
+            }
+        });
+    }
+    function toggleAllSelection(source, catClass) { document.querySelectorAll(`.chk-${catClass}`).forEach(cb => cb.checked = source.checked); }
+    function startTrainingFromSelection() { 
+        const checked = document.querySelectorAll('#selection-list input[type="checkbox"]:not([onchange]):checked'); 
+        if (checked.length === 0) return; 
+        trainingQueue = Array.from(checked).map(c => { const l = repertoire[currentSide].find(x => x.id == c.value); return JSON.parse(JSON.stringify(l)); }).sort(() => Math.random() - 0.5); 
+        totalTrainingLines = trainingQueue.length;
+        mode = 'train'; switchUI('train-mode'); nextTrainingLine(); 
+    }
+    
+    function continueFromNote() { $('#training-note-display').fadeOut(); isPaused = false; if (pendingNextAction) { const action = pendingNextAction; pendingNextAction = null; action(); } }
+    function processGameStep(nextAction) { const fen = getCleanFen(); const note = currentTrainLine.comments[fen]; if (note) { $('#note-text').text(note); $('#training-note-display').css('display', 'flex').hide().fadeIn(); isPaused = true; pendingNextAction = nextAction; } else { $('#training-note-display').hide(); if (nextAction) nextAction(); } }
+    
+    function updateProgress() {
+        const remaining = trainingQueue.length;
+        const done = totalTrainingLines - remaining;
+        const percent = (done / totalTrainingLines) * 100;
+        document.getElementById('progress-fill').style.width = percent + '%';
+        document.getElementById('progress-text-right').innerText = `${done} / ${totalTrainingLines}`;
+    }
+
+    function nextTrainingLine() { 
+        if (trainingQueue.length === 0) { stopTraining(); return; } 
+        updateProgress();
+        currentTrainLine = trainingQueue[0]; 
+        
+        document.getElementById('train-category-display').innerText = currentTrainLine.category; 
+        updateRepetitionButtonState();
+        
+        $('#training-note-display').hide(); isPaused = false;
+        
+        let tGame = new Chess(); tGame.load_pgn(currentTrainLine.pgn); 
+        currentTrainLine.moveHistory = tGame.history({ verbose: true }); 
+        game.reset(); board.position(game.fen()); board.orientation(currentSide); currentMoveIndex = 0; 
+        $('#board .square-55d63').removeClass('highlight-square'); 
+        updateTrainStatus("Dein Zug", "neutral"); 
+        processGameStep(() => { if (currentSide === 'black') playBotMove(); });
+    }
+
+    function handleTrainingMove(move) { 
+        const expected = currentTrainLine.moveHistory[currentMoveIndex]; 
+        if (!expected || (move.from === expected.from && move.to === expected.to)) { 
+            currentMoveIndex++; 
+            processGameStep(() => {
+                if (!expected || currentMoveIndex >= currentTrainLine.moveHistory.length) { successLine(); } 
+                else { setTimeout(playBotMove, 250); }
+            });
+        } else { 
+            playSound('error'); 
+            updateTrainStatus("FALSCH!", "error"); 
+            if (userSettings.autoRepeat) { addToRepetition(currentTrainLine); }
+            setTimeout(() => { game.undo(); board.position(game.fen()); updateTrainStatus("Dein Zug", "neutral"); }, 800); 
+        } 
+    }
+    function playBotMove() { 
+        if (currentMoveIndex < currentTrainLine.moveHistory.length) { 
+            const botMove = currentTrainLine.moveHistory[currentMoveIndex]; 
+            game.move(botMove); board.position(game.fen()); 
+            playSound('move'); highlightLastMove(botMove); currentMoveIndex++; 
+            processGameStep(() => { if (currentMoveIndex >= currentTrainLine.moveHistory.length) successLine(); });
+        } 
+    }
+    function successLine() { playSound('capture'); trainingQueue.shift(); const boardEl = document.getElementById('board'); boardEl.style.boxShadow = "0 0 20px var(--success)"; updateTrainStatus("RICHTIG!", "success"); setTimeout(() => { boardEl.style.boxShadow = "var(--shadow)"; updateTrainStatus("...", "neutral"); nextTrainingLine(); }, 800); }
+    
+    function updateTrainStatus(t, className) { const e = document.getElementById('train-status'); e.innerText = t; e.className = `status-badge ${className}`; }
+    function repeatLater() { trainingQueue.push(trainingQueue.shift()); nextTrainingLine(); }
+    function stopTraining() { mode = 'view'; switchUI('view-mode'); resetBoardSearch(); isPaused = false; }
+    function switchUI(id) { document.querySelectorAll('.controls-area > div').forEach(d => d.classList.add('hidden')); document.getElementById(id).classList.remove('hidden'); if(id === 'view-mode' || id === 'settings-mode') document.querySelector('.header-row').classList.remove('hidden'); else document.querySelector('.header-row').classList.add('hidden'); setTimeout(() => board.resize(), 200); }
+    function saveData() { localStorage.setItem('chessRepertoire_v3', JSON.stringify(repertoire)); }
+
+    applySettings(); initBoard(); setSide('white'); window.onresize = board.resize;
+</script>
+</body>
+</html>
