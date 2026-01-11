@@ -783,11 +783,25 @@
             
             <textarea id="move-note-input" class="note-input" placeholder="Notiz zu dieser Stellung..."></textarea>
             
-            <button class="action-btn secondary clear-shapes-btn" onclick="clearShapesForCurrentPos()" style="margin-top:10px; margin-bottom:10px; padding: 10px;">
-                <i class="fas fa-eraser"></i> Pfeile löschen
-            </button>
+            <div style="display:flex; gap:10px;">
+                <button class="action-btn secondary clear-shapes-btn" onclick="clearShapesForCurrentPos()" style="margin-top:10px; margin-bottom:10px; padding: 10px;">
+                    <i class="fas fa-eraser"></i> Pfeile löschen
+                </button>
+                <button class="action-btn secondary" onclick="undoLastMove()" style="margin-top:10px; margin-bottom:10px; padding: 10px;">
+                    <i class="fas fa-undo"></i> Zug zurücknehmen
+                </button>
+            </div>
 
-            <div style="font-size:0.9rem; color:var(--text-muted); margin: 10px 0;"><i class="fas fa-info-circle"></i> Züge auf dem Brett ausführen</div>
+            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                <button class="action-btn secondary annotation-btn" onclick="annotateMove('?!')" style="padding: 8px 12px; font-weight:bold;">?!</button>
+                <button class="action-btn secondary annotation-btn" onclick="annotateMove('?')" style="padding: 8px 12px; font-weight:bold;">?</button>
+                <button class="action-btn secondary annotation-btn" onclick="annotateMove('??')" style="padding: 8px 12px; font-weight:bold;">??</button>
+                <button class="action-btn secondary annotation-btn" onclick="annotateMove('∓')" style="padding: 8px 12px; font-weight:bold;">∓</button>
+                <button class="action-btn secondary annotation-btn" onclick="annotateMove('±')" style="padding: 8px 12px; font-weight:bold;">±</button>
+                <button class="action-btn secondary annotation-btn" onclick="annotateMove('−+')" style="padding: 8px 12px; font-weight:bold;">−+</button>
+                <button class="action-btn secondary annotation-btn" onclick="annotateMove('+−')" style="padding: 8px 12px; font-weight:bold;">+−</button>
+                <button class="action-btn secondary annotation-btn" onclick="annotateMove('=')" style="padding: 8px 12px; font-weight:bold;">=</button>
+            </div>
             <div id="pgn-display" style="background: var(--bg-input); padding:15px; border-radius:var(--radius); font-family:monospace; margin-bottom:15px; flex-grow:1; overflow-y:auto; font-size:0.9rem; color:var(--text-main); min-height: 60px;"></div>
             <div class="action-group">
                 <button class="action-btn" onclick="saveLine()" id="save-btn">Speichern</button>
@@ -834,7 +848,6 @@
     </div>
 </div>
 
-<!-- TRAINING RESULTS OVERLAY -->
 <div class="training-results-overlay" id="training-results-overlay">
     <div class="results-card">
         <div class="results-header">
@@ -1085,6 +1098,9 @@
     let mode = 'view'; let editingId = null; let repertoire = JSON.parse(localStorage.getItem('chessRepertoire_v3')) || { white: [], black: [] };
     let currentComments = {}; 
     let currentShapes = {}; 
+    let currentAnnotations = {}; 
+    let currentDisplayAnnotations = {}; 
+    let currentTrainingAnnotations = {}; 
     let trainingQueue = []; let currentTrainLine = null; let currentMoveIndex = 0;
 
     function getCleanFen() { return game.fen().split(' ').slice(0, 4).join(' '); }
@@ -1101,6 +1117,7 @@
         return new Promise((resolve) => {
             setTimeout(() => {
                 if (mode === 'add') { 
+                    currentDisplayAnnotations = {}; // Clear annotations when making a new move
                     updatePgnDisplay(); 
                     loadNoteForCurrentPos(); 
                 } 
@@ -1144,6 +1161,8 @@
         if(isEngineRunning && engine) engine.postMessage('stop');
         document.getElementById('eval-fill').style.height = '50%';
         document.getElementById('eval-score').innerText = '0.0';
+        currentTrainingAnnotations = {}; // Clear training annotations
+        currentDisplayAnnotations = {}; // Clear display annotations
         drawShapes();
     }
     
@@ -1317,22 +1336,90 @@
     }
     
     function deleteLine(id) { if(confirm('Löschen?')) { repertoire[currentSide] = repertoire[currentSide].filter(l => l.id !== id); saveData(); renderList(game.pgn()); } }
-    function startAddingLine(preselectedCat) { resetBoardSearch(); editingId = null; let cat = (typeof preselectedCat === 'string') ? preselectedCat : ""; prepareEditor("Neue Variante", "", cat, {}); }
-    function editLine(id) { const line = repertoire[currentSide].find(l => l.id === id); if (!line) return; editingId = id; prepareEditor("Bearbeiten", line.pgn, line.category, line.comments || {}, line.shapes || {}); }
+    function startAddingLine(preselectedCat) { resetBoardSearch(); editingId = null; let cat = (typeof preselectedCat === 'string') ? preselectedCat : ""; prepareEditor("Neue Variante", "", cat, {}, {}, {}); }
+    function editLine(id) { const line = repertoire[currentSide].find(l => l.id === id); if (!line) return; editingId = id; prepareEditor("Bearbeiten", line.pgn, line.category, line.comments || {}, line.shapes || {}, line.annotations || {}); }
     
     // UPDATED PREPARE EDITOR (ACCEPTS SHAPES)
-    function prepareEditor(title, pgn, category, commentsData, shapesData) { 
+    function prepareEditor(title, pgn, category, commentsData, shapesData, annotationsData) { 
         mode = 'add'; switchUI('add-mode'); 
         document.getElementById('category-input').value = category; 
         currentComments = JSON.parse(JSON.stringify(commentsData)); 
         currentShapes = JSON.parse(JSON.stringify(shapesData || {})); // Shapes laden
+        currentAnnotations = JSON.parse(JSON.stringify(annotationsData || {})); // Annotations laden
+        currentDisplayAnnotations = {}; // Reset display annotations
         
-        const datalist = document.getElementById('category-datalist'); datalist.innerHTML = ''; Object.keys(getGroupedLines(currentSide)).forEach(cat => { const opt = document.createElement('option'); opt.value = cat; datalist.appendChild(opt); }); game.reset(); if (pgn) game.load_pgn(pgn); board.position(game.fen()); board.orientation(currentSide); const history = game.history({verbose:true}); if(history.length) highlightLastMove(history[history.length-1]); else $('#board .square-55d63').removeClass('highlight-square'); updatePgnDisplay(); loadNoteForCurrentPos(); 
+        const datalist = document.getElementById('category-datalist'); datalist.innerHTML = ''; Object.keys(getGroupedLines(currentSide)).forEach(cat => { const opt = document.createElement('option'); opt.value = cat; datalist.appendChild(opt); }); game.reset(); if (pgn) game.load_pgn(pgn); board.position(game.fen()); board.orientation(currentSide); const history = game.history({verbose:true}); 
+        
+        // Build display annotations from loaded annotations
+        Object.keys(currentAnnotations).forEach(index => {
+            const moveIndex = parseInt(index);
+            if (history[moveIndex]) {
+                currentDisplayAnnotations[history[moveIndex].to] = currentAnnotations[index];
+            }
+        });
+        
+        if(history.length) highlightLastMove(history[history.length-1]); else $('#board .square-55d63').removeClass('highlight-square'); updatePgnDisplay(); loadNoteForCurrentPos(); 
         drawShapes();
     }
     
-    function updatePgnDisplay() { const pgnEl = document.getElementById('pgn-display'); pgnEl.innerText = game.pgn() || "Züge spielen..."; pgnEl.scrollTop = pgnEl.scrollHeight; }
+    function updatePgnDisplay() { 
+        const pgnEl = document.getElementById('pgn-display'); 
+        let pgnText = game.pgn() || "Züge spielen...";
+        // Add annotations to the PGN display
+        const history = game.history({ verbose: true });
+        let annotatedPgn = "";
+        let moveNumber = 1;
+        for (let i = 0; i < history.length; i++) {
+            const move = history[i];
+            if (i % 2 === 0) {
+                annotatedPgn += moveNumber + ". ";
+                moveNumber++;
+            }
+            annotatedPgn += move.san;
+            if (currentAnnotations[i]) {
+                annotatedPgn += currentAnnotations[i];
+            }
+            annotatedPgn += " ";
+        }
+        pgnEl.innerText = annotatedPgn.trim() || "Züge spielen...";
+        pgnEl.scrollTop = pgnEl.scrollHeight; 
+    }
     
+    // --- UNDO FUNCTION ---
+    function undoLastMove() {
+        // Get the move that will be undone
+        const historyBefore = game.history({verbose: true});
+        const moveToUndo = historyBefore[historyBefore.length - 1];
+        
+        // Remove last move from game
+        const move = game.undo();
+        if (move) {
+            // Remove annotation for the undone move
+            const undoneIndex = historyBefore.length - 1;
+            delete currentAnnotations[undoneIndex];
+            if (moveToUndo) {
+                delete currentDisplayAnnotations[moveToUndo.to];
+            }
+            
+            // Update Board
+            board.position(game.fen());
+            
+            // Highlight the move before the one we just undid (if any)
+            const history = game.history({verbose:true});
+            if (history.length > 0) {
+                highlightLastMove(history[history.length-1]);
+            } else {
+                $('#board .square-55d63').removeClass('highlight-square');
+            }
+            
+            // Update UI components
+            updatePgnDisplay();
+            loadNoteForCurrentPos(); // Re-load notes/shapes for the previous position
+            
+            playSound('move');
+        }
+    }
+
     function saveLine() { 
         const pgn = game.pgn(); if (pgn.trim() === '') { alert("Keine Züge."); return; } 
         const catInput = document.getElementById('category-input').value.trim(); 
@@ -1340,11 +1427,23 @@
         const moves = game.history({ verbose: true }); 
         
         // Save Shapes too!
-        const lineData = { id: editingId || Date.now(), pgn, category, moves, comments: currentComments, shapes: currentShapes }; 
+        const lineData = { id: editingId || Date.now(), pgn, category, moves, comments: currentComments, shapes: currentShapes, annotations: currentAnnotations }; 
         
         if (editingId) { const index = repertoire[currentSide].findIndex(l => l.id === editingId); if (index !== -1) repertoire[currentSide][index] = lineData; } else repertoire[currentSide].push(lineData); saveData(); cancelAdd(); 
     }
-    function cancelAdd() { mode = 'view'; editingId = null; currentComments = {}; currentShapes = {}; switchUI('view-mode'); resetBoardSearch(); }
+    function cancelAdd() { mode = 'view'; editingId = null; currentComments = {}; currentShapes = {}; currentAnnotations = {}; currentDisplayAnnotations = {}; switchUI('view-mode'); resetBoardSearch(); }
+    function annotateMove(annotation) {
+        const history = game.history({ verbose: true });
+        if (history.length === 0) return;
+        const lastMoveIndex = history.length - 1;
+        currentAnnotations[lastMoveIndex] = annotation;
+        // Clear previous display annotations and add only the current one
+        currentDisplayAnnotations = {};
+        const lastMove = history[lastMoveIndex];
+        currentDisplayAnnotations[lastMove.to] = annotation;
+        updatePgnDisplay(); // Refresh the PGN display to show annotations
+        drawShapes(); // Update the board display
+    }
     function openSelectionMode() { if (repertoire[currentSide].length === 0) { alert("Nichts zum Üben."); return; } mode = 'selection'; switchUI('selection-mode'); renderSelectionList(); }
     
     function renderSelectionList() {
@@ -1448,7 +1547,9 @@
         
         // Reset Visuals
         $('#board .square-55d63').removeClass('highlight-square'); 
-        currentShapes = {}; drawShapes(); 
+        currentShapes = {}; 
+        currentTrainingAnnotations = {}; 
+        drawShapes();
 
         updateTrainStatus("Dein Zug", "neutral"); 
         processGameStep(() => { if (currentSide === 'black') playBotMove(); });
@@ -1465,6 +1566,11 @@
         function handleTrainingMove(move) { 
             const expected = currentTrainLine.moveHistory[currentMoveIndex]; 
             if (!expected || (move.from === expected.from && move.to === expected.to)) { 
+                // Clear previous annotations and add only the current one
+                currentTrainingAnnotations = {};
+                if (currentTrainLine.annotations && currentTrainLine.annotations[currentMoveIndex]) {
+                    currentTrainingAnnotations[expected.to] = currentTrainLine.annotations[currentMoveIndex];
+                }
                 currentMoveIndex++; 
                 setTimeout(() => {
                     processGameStep(() => {
@@ -1511,6 +1617,11 @@
             setTimeout(() => {
                 playSound('move'); 
                 highlightLastMove(botMove); 
+                // Clear previous annotations and add only the current one
+                currentTrainingAnnotations = {};
+                if (currentTrainLine.annotations && currentTrainLine.annotations[currentMoveIndex]) {
+                    currentTrainingAnnotations[botMove.to] = currentTrainLine.annotations[currentMoveIndex];
+                }
                 currentMoveIndex++; 
                 
                 setTimeout(() => {
@@ -1599,15 +1710,21 @@
         return null;
     }
 
+    // UPDATED: Use Capture phase or just handle bubbling correctly for pieces
     boardWrapper.addEventListener('mousedown', (e) => {
         // Disable drawing on touch devices (phones/tablets)
         if (isTouchDevice) return;
         if(e.button === 2) { // Right Click
             isDrawing = true;
             startSquare = getSquareFromCoords(e.clientX, e.clientY);
-            e.preventDefault();
+            // Don't prevent default here immediately or it might block context menu logic check later
+            // But we do prevent propagation to pieces if needed? 
+            // Actually, just letting it bubble is fine, as long as we catch it here.
         }
     });
+
+    // Add this to prevent default context menu on the board
+    boardWrapper.addEventListener('contextmenu', (e) => { e.preventDefault(); return false; });
 
     boardWrapper.addEventListener('mouseup', (e) => {
         if (isTouchDevice) return;
@@ -1626,8 +1743,6 @@
             e.preventDefault();
         }
     });
-
-    boardWrapper.addEventListener('contextmenu', (e) => { e.preventDefault(); });
 
     // NEW FUNCTION: CLEAR SHAPES
     function clearShapesForCurrentPos() {
@@ -1701,6 +1816,18 @@
                 drawArrow(shape.from, shape.to, shape.color);
             }
         });
+
+        // Draw annotations based on mode
+        let annotationsToDraw = {};
+        if (mode === 'train') {
+            annotationsToDraw = currentTrainingAnnotations;
+        } else if (mode === 'add') {
+            annotationsToDraw = currentDisplayAnnotations;
+        }
+        
+        Object.keys(annotationsToDraw).forEach(sq => {
+            drawAnnotation(sq, annotationsToDraw[sq]);
+        });
     }
 
     function getColorCode(c) {
@@ -1712,8 +1839,10 @@
     }
 
     function getSquareCenter(sq) {
-        const rect = boardWrapper.getBoundingClientRect();
-        const size = rect.width / 8;
+        const boardEl = document.getElementById('board');
+        const boardRect = boardEl.getBoundingClientRect();
+        const boardWrapperRect = boardWrapper.getBoundingClientRect();
+        const size = boardRect.width / 8;
         const files = ['a','b','c','d','e','f','g','h'];
         const ranks = ['8','7','6','5','4','3','2','1'];
         
@@ -1725,9 +1854,13 @@
             row = 7 - row;
         }
         
+        // Calculate position relative to boardWrapper (SVG coordinate system)
+        const offsetX = boardRect.left - boardWrapperRect.left;
+        const offsetY = boardRect.top - boardWrapperRect.top;
+        
         return {
-            x: col * size + size / 2,
-            y: row * size + size / 2
+            x: col * size + size / 2 + offsetX,
+            y: row * size + size / 2 + offsetY
         };
     }
 
@@ -1763,6 +1896,58 @@
         circle.setAttribute("opacity", "0.8");
         
         svgOverlay.appendChild(circle);
+    }
+
+    function drawAnnotation(sq, annotation) {
+        const center = getSquareCenter(sq);
+        const boardEl = document.getElementById('board');
+        const rect = boardEl.getBoundingClientRect();
+        const size = rect.width / 8;
+        
+        // Position proportionally to square size for consistent placement on all screen sizes
+        const offsetX = size * 0.2; // 20% of square size from right edge
+        const offsetY = size * 0.2; // 20% of square size from top edge (moved closer to top)
+        
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", center.x + size / 2 - offsetX);
+        text.setAttribute("y", center.y - size / 2 + offsetY);
+        text.setAttribute("font-size", Math.max(14, size * 0.25)); // Scale font size with square size, min 14px
+        text.setAttribute("font-weight", "bold");
+        // Set text color based on annotation
+        let textColor = "#000"; // default black
+        if (annotation === "??" || annotation === "?" || annotation === "?!" || annotation === "∓" || annotation === "−+") {
+            textColor = "#fff"; // white for dark backgrounds
+        }
+        text.setAttribute("fill", textColor);
+        text.setAttribute("text-anchor", "middle");
+        text.setAttribute("dominant-baseline", "middle"); // Center vertically
+        text.textContent = annotation;
+        
+        // Add background circle for visibility with color based on annotation
+        let bgColor = "rgba(255,255,255,0.8)"; // default white
+        if (annotation === "??") bgColor = "rgba(239, 68, 68, 0.9)"; // red for blunder
+        else if (annotation === "?") bgColor = "rgba(249, 115, 22, 0.9)"; // orange for mistake
+        else if (annotation === "?!") bgColor = "rgba(234, 179, 8, 0.9)"; // yellow for dubious
+        else if (annotation === "∓") bgColor = "rgba(0,0,0,0.8)"; // black for black much better
+        else if (annotation === "±") bgColor = "rgba(255,255,255,0.9)"; // white for white much better
+        else if (annotation === "−+") bgColor = "rgba(0,0,0,0.8)"; // black for black slightly better
+        else if (annotation === "+−") bgColor = "rgba(255,255,255,0.9)"; // white for white slightly better
+        else if (annotation === "=") bgColor = "rgba(255,255,255,0.9)"; // white for equal
+        
+        const bg = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        bg.setAttribute("cx", center.x + size / 2 - offsetX);
+        bg.setAttribute("cy", center.y - size / 2 + offsetY);
+        bg.setAttribute("r", Math.max(10, size * 0.2)); // Scale circle size with square size, min 10px
+        bg.setAttribute("fill", bgColor);
+        
+        // Add black border for white circles
+        if (bgColor.includes("255,255,255")) {
+            bg.setAttribute("stroke", "#000");
+            bg.setAttribute("stroke-width", "1");
+        }
+        
+        svgOverlay.appendChild(bg);
+        svgOverlay.appendChild(text);
     }
     
     window.addEventListener('resize', () => {
