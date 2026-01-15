@@ -180,11 +180,26 @@
         <div id="add-mode" class="hidden">
             <div class="add-mode-header">
                 <h2>Neue Variante</h2>
+                <button class="analyze-btn" onclick="toggleAnalysisMenu()">
+                    <i class="fas fa-microscope"></i> Analysieren
+                </button>
             </div>
             <input type="text" id="category-input" list="category-datalist" placeholder="Kategorie (z.B. Sizilianisch)...">
             <datalist id="category-datalist"></datalist>
             
             <textarea id="move-note-input" class="note-input" placeholder="Notiz zu dieser Stellung..."></textarea>
+            
+            <!-- Stockfish Analysis Section -->
+            <div class="analysis-section hidden" id="analysis-section">
+                <div class="explorer-header">
+                    <i class="fas fa-robot"></i>
+                    <span>Stockfish Analyse</span>
+                    <span class="analysis-depth" id="analysis-depth"></span>
+                </div>
+                <div class="explorer-moves" id="analysis-moves">
+                    <div class="explorer-placeholder">Analysiere...</div>
+                </div>
+            </div>
             
             <!-- Opening Explorer Section -->
             <div class="explorer-section">

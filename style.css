@@ -883,6 +883,71 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
     font-size: 1.1rem;
 }
 
+/* Analyze button */
+.analyze-btn {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    color: var(--text-main);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.analyze-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--primary);
+}
+
+.analyze-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.analyze-btn i {
+    font-size: 0.85rem;
+}
+
+/* Analysis section */
+.analysis-section {
+    background: var(--bg-input);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 15px;
+    border: 1px solid var(--primary);
+}
+
+.analysis-depth {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.analysis-move-eval {
+    font-family: monospace;
+    font-size: 0.8rem;
+    font-weight: 600;
+    min-width: 55px;
+    text-align: right;
+}
+
+.analysis-move-eval.positive {
+    color: #22c55e;
+}
+
+.analysis-move-eval.negative {
+    color: #ef4444;
+}
+
+.analysis-move-eval.neutral {
+    color: var(--text-muted);
+}
+
 /* PGN display */
 #pgn-display {
     background: var(--bg-input);

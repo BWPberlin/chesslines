@@ -254,6 +254,7 @@ function onDrop (source, target) {
                 updatePgnDisplay(); 
                 loadNoteForCurrentPos();
                 updateOpeningExplorer(); // Update explorer with new position
+                updateAnalysisIfActive(); // Update analysis if enabled
             } 
             else if (mode === 'train') { 
                 handleTrainingMove(move); 
@@ -692,6 +693,11 @@ function prepareEditor(title, pgn, category, commentsData, shapesData, annotatio
     currentAnnotations = JSON.parse(JSON.stringify(annotationsData || {})); // Annotations laden
     currentDisplayAnnotations = {}; // Reset display annotations
     
+    // Reset analysis state when entering add mode
+    analysisActive = false;
+    document.getElementById('analysis-section').classList.add('hidden');
+    document.querySelector('.analyze-btn')?.classList.remove('active');
+    
     const datalist = document.getElementById('category-datalist'); datalist.innerHTML = ''; Object.keys(getGroupedLines(currentSide)).forEach(cat => { const opt = document.createElement('option'); opt.value = cat; datalist.appendChild(opt); }); game.reset(); if (pgn) game.load_pgn(pgn); board.position(game.fen()); board.orientation(currentSide); const history = game.history({verbose:true}); 
     
     // Build display annotations from loaded annotations
@@ -817,6 +823,9 @@ function undoLastMove() {
         loadNoteForCurrentPos(); // Re-load notes/shapes for the previous position
         
         playSound('move');
+        
+        // Update analysis if in add mode
+        updateAnalysisIfActive();
     }
 }
 
@@ -831,7 +840,23 @@ function saveLine() {
     
     if (editingId) { const index = repertoire[currentSide].findIndex(l => l.id === editingId); if (index !== -1) repertoire[currentSide][index] = lineData; } else repertoire[currentSide].push(lineData); saveData(); cancelAdd(); 
 }
-function cancelAdd() { mode = 'view'; editingId = null; currentComments = {}; currentShapes = {}; currentAnnotations = {}; currentDisplayAnnotations = {}; switchUI('view-mode'); resetBoardSearch(); }
+function cancelAdd() { 
+    mode = 'view'; 
+    editingId = null; 
+    currentComments = {}; 
+    currentShapes = {}; 
+    currentAnnotations = {}; 
+    currentDisplayAnnotations = {}; 
+    // Reset analysis when leaving add mode
+    if (analysisActive) {
+        analysisActive = false;
+        document.getElementById('analysis-section').classList.add('hidden');
+        document.querySelector('.analyze-btn')?.classList.remove('active');
+        if (analysisEngine) analysisEngine.postMessage('stop');
+    }
+    switchUI('view-mode'); 
+    resetBoardSearch(); 
+}
 function annotateMove(annotation) {
     const history = game.history({ verbose: true });
     if (history.length === 0) return;
@@ -1724,6 +1749,220 @@ function addWrongLinesToRepetition() {
 function closeTrainingResults() {
     document.getElementById('training-results-overlay').style.display = 'none';
     stopTraining();
+}
+
+// --- STOCKFISH ANALYSIS MENU ---
+let analysisActive = false;
+let analysisEngine = null;
+let analysisResults = [];
+
+function toggleAnalysisMenu() {
+    analysisActive = !analysisActive;
+    const section = document.getElementById('analysis-section');
+    const btn = document.querySelector('.analyze-btn');
+    
+    if (analysisActive) {
+        section.classList.remove('hidden');
+        btn.classList.add('active');
+        runStockfishAnalysis();
+    } else {
+        section.classList.add('hidden');
+        btn.classList.remove('active');
+        if (analysisEngine) {
+            analysisEngine.postMessage('stop');
+        }
+    }
+}
+
+async function runStockfishAnalysis() {
+    if (!analysisActive) return;
+    
+    const container = document.getElementById('analysis-moves');
+    const depthSpan = document.getElementById('analysis-depth');
+    
+    container.innerHTML = '<div class="explorer-loading"><i class="fas fa-spinner fa-spin"></i> Analysiere...</div>';
+    depthSpan.innerText = '';
+    
+    // Initialize engine if needed
+    if (!analysisEngine) {
+        try {
+            analysisEngine = await Stockfish();
+            analysisEngine.postMessage('uci');
+            await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (e) {
+            container.innerHTML = '<div class="explorer-error"><i class="fas fa-exclamation-triangle"></i> Engine nicht verfügbar</div>';
+            return;
+        }
+    }
+    
+    const fen = game.fen();
+    analysisResults = [];
+    let currentDepth = 0;
+    
+    // Set up message listener for this analysis
+    const messageHandler = (line) => {
+        if (typeof line !== 'string') return;
+        
+        // Parse info lines with multipv
+        if (line.startsWith('info') && line.includes('multipv') && line.includes('pv')) {
+            const tokens = line.split(' ');
+            
+            const depthIdx = tokens.indexOf('depth');
+            const depth = depthIdx !== -1 ? parseInt(tokens[depthIdx + 1]) : 0;
+            
+            const multipvIdx = tokens.indexOf('multipv');
+            const multipv = multipvIdx !== -1 ? parseInt(tokens[multipvIdx + 1]) : 1;
+            
+            const scoreIdx = tokens.indexOf('score');
+            let score = null;
+            let isMate = false;
+            if (scoreIdx !== -1) {
+                const type = tokens[scoreIdx + 1];
+                const value = parseInt(tokens[scoreIdx + 2]);
+                if (type === 'mate') {
+                    score = value;
+                    isMate = true;
+                } else if (type === 'cp') {
+                    score = value / 100;
+                }
+            }
+            
+            const pvIdx = tokens.indexOf('pv');
+            const pvMoves = pvIdx !== -1 ? tokens.slice(pvIdx + 1) : [];
+            
+            if (depth > 0 && pvMoves.length > 0) {
+                // Convert UCI move to SAN
+                const uciMove = pvMoves[0];
+                let sanMove = uciToSan(uciMove, fen);
+                
+                // Update results for this multipv line
+                if (depth >= currentDepth) {
+                    currentDepth = depth;
+                    analysisResults[multipv - 1] = {
+                        move: sanMove,
+                        uci: uciMove,
+                        score: score,
+                        isMate: isMate,
+                        depth: depth,
+                        pv: pvMoves.slice(0, 5)
+                    };
+                    
+                    // Update display
+                    if (multipv === 1 || depth >= 8) {
+                        renderAnalysisMoves();
+                        depthSpan.innerText = `Tiefe ${depth}`;
+                    }
+                }
+            }
+        }
+    };
+    
+    analysisEngine.addMessageListener(messageHandler);
+    
+    // Configure for multipv analysis
+    analysisEngine.postMessage('stop');
+    analysisEngine.postMessage('setoption name MultiPV value 5');
+    analysisEngine.postMessage(`position fen ${fen}`);
+    analysisEngine.postMessage('go depth 18');
+}
+
+function uciToSan(uci, fen) {
+    // Create a temporary game to convert UCI to SAN
+    const tempGame = new Chess(fen);
+    const from = uci.substring(0, 2);
+    const to = uci.substring(2, 4);
+    const promotion = uci.length > 4 ? uci[4] : undefined;
+    
+    try {
+        const move = tempGame.move({ from, to, promotion });
+        return move ? move.san : uci;
+    } catch (e) {
+        return uci;
+    }
+}
+
+function renderAnalysisMoves() {
+    const container = document.getElementById('analysis-moves');
+    const turn = game.turn(); // 'w' or 'b'
+    
+    if (analysisResults.length === 0) {
+        container.innerHTML = '<div class="explorer-placeholder">Keine Analyse verfügbar</div>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    
+    analysisResults.filter(r => r).forEach((result, index) => {
+        if (!result) return;
+        
+        // Adjust score for black's perspective
+        let displayScore = result.score;
+        if (turn === 'b' && displayScore !== null) {
+            displayScore = -displayScore;
+        }
+        
+        let evalText, evalClass;
+        if (result.isMate) {
+            evalText = displayScore > 0 ? `M${Math.abs(result.score)}` : `-M${Math.abs(result.score)}`;
+            evalClass = displayScore > 0 ? 'positive' : 'negative';
+        } else if (displayScore !== null) {
+            evalText = displayScore > 0 ? `+${displayScore.toFixed(1)}` : displayScore.toFixed(1);
+            evalClass = displayScore > 0.3 ? 'positive' : displayScore < -0.3 ? 'negative' : 'neutral';
+        } else {
+            evalText = '?';
+            evalClass = 'neutral';
+        }
+        
+        const moveDiv = document.createElement('div');
+        moveDiv.className = 'explorer-move';
+        moveDiv.onclick = () => playAnalysisMove(result.uci);
+        
+        moveDiv.innerHTML = `
+            <div class="explorer-move-san">${result.move}</div>
+            <div class="analysis-move-eval ${evalClass}">${evalText}</div>
+        `;
+        
+        container.appendChild(moveDiv);
+    });
+}
+
+function playAnalysisMove(uci) {
+    try {
+        const from = uci.substring(0, 2);
+        const to = uci.substring(2, 4);
+        const promotion = uci.length > 4 ? uci[4] : undefined;
+        
+        const move = game.move({ from, to, promotion });
+        if (!move) return;
+        
+        board.position(game.fen(), false);
+        if (move.captured) playSound('capture');
+        else playSound('move');
+        highlightLastMove(move);
+        
+        currentDisplayAnnotations = {};
+        updatePgnDisplay();
+        loadNoteForCurrentPos();
+        updateOpeningExplorer();
+        
+        // Re-run analysis for new position
+        if (analysisActive) {
+            runStockfishAnalysis();
+        }
+        
+        if (isEngineRunning && mode !== 'bot' && mode !== 'train') {
+            setTimeout(startEvaluation, 50);
+        }
+    } catch (e) {
+        console.error('Failed to play analysis move:', e);
+    }
+}
+
+// Update analysis when position changes in add mode
+function updateAnalysisIfActive() {
+    if (analysisActive && mode === 'add') {
+        runStockfishAnalysis();
+    }
 }
 
 // --- LICHESS OPENING EXPLORER ---
