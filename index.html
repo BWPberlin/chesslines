@@ -119,10 +119,6 @@
                     </div>
                 </div>
 
-                <div class="settings-section">
-                    <span class="settings-label">Darstellung</span>
-                    <div class="toggle-row" onclick="toggleThemeSetting()" id="setting-theme-row"><span>Dark Mode</span><div class="toggle-switch"></div></div>
-                </div>
                     <div class="settings-section">
                         <span class="settings-label">Darstellung</span>
                     <div class="toggle-row" onclick="toggleThemeSetting()" id="setting-theme-row">
@@ -138,7 +134,6 @@
                     <div class="toggle-row" onclick="toggleSetting('coords')" id="setting-coords-row"><span>Koordinaten</span><div class="toggle-switch"></div></div>
                     <div class="toggle-row" onclick="toggleSetting('highlight')" id="setting-highlight-row"><span>Zug hervorheben</span><div class="toggle-switch"></div></div>
                     <div class="toggle-row" onclick="toggleSetting('autoRepeat')" id="setting-autorepeat-row"><span>Auto-Wiederholung bei Fehler</span><div class="toggle-switch"></div></div>
-                    <div class="toggle-row" onclick="toggleEngine()" id="setting-engine-row"><span>Stockfish Analyse</span><div class="toggle-switch"></div></div>
                     <div class="toggle-row" onclick="toggleSortMode()" id="setting-sortmode-row"><span>Sortierung nach Können</span><div class="toggle-switch"></div></div>
                 </div>
                 <div class="settings-section">
@@ -174,46 +169,95 @@
                         <div class="option-card" onclick="setPieceTheme('blindfold')" id="opt-piece-blindfold">Blindfold</div>
                     </div>
                 </div>
+                <div class="settings-section">
+                    <span class="settings-label">Varianten-Editor Reihenfolge</span>
+                    <div class="order-list" id="editor-order-list">
+                        <div class="order-item" data-key="name"><i class="fas fa-grip-lines"></i><span>Kategorie</span><div class="order-arrows"><button onclick="moveOrderItem('name', -1)"><i class="fas fa-chevron-up"></i></button><button onclick="moveOrderItem('name', 1)"><i class="fas fa-chevron-down"></i></button></div></div>
+                        <div class="order-item" data-key="stockfish"><i class="fas fa-grip-lines"></i><span>Stockfish Analyse</span><div class="order-arrows"><button onclick="moveOrderItem('stockfish', -1)"><i class="fas fa-chevron-up"></i></button><button onclick="moveOrderItem('stockfish', 1)"><i class="fas fa-chevron-down"></i></button></div></div>
+                        <div class="order-item" data-key="database"><i class="fas fa-grip-lines"></i><span>Datenbank</span><div class="order-arrows"><button onclick="moveOrderItem('database', -1)"><i class="fas fa-chevron-up"></i></button><button onclick="moveOrderItem('database', 1)"><i class="fas fa-chevron-down"></i></button></div></div>
+                        <div class="order-item" data-key="moves"><i class="fas fa-grip-lines"></i><span>Züge</span><div class="order-arrows"><button onclick="moveOrderItem('moves', -1)"><i class="fas fa-chevron-up"></i></button><button onclick="moveOrderItem('moves', 1)"><i class="fas fa-chevron-down"></i></button></div></div>
+                        <div class="order-item" data-key="notes"><i class="fas fa-grip-lines"></i><span>Notizen</span><div class="order-arrows"><button onclick="moveOrderItem('notes', -1)"><i class="fas fa-chevron-up"></i></button><button onclick="moveOrderItem('notes', 1)"><i class="fas fa-chevron-down"></i></button></div></div>
+                    </div>
+                </div>
             </div>
         </div>
 
         <div id="add-mode" class="hidden">
             <div class="add-mode-header">
                 <h2>Neue Variante</h2>
-                <button class="analyze-btn" onclick="toggleAnalysisMenu()">
-                    <i class="fas fa-microscope"></i> Analysieren
-                </button>
-            </div>
-            <input type="text" id="category-input" list="category-datalist" placeholder="Kategorie (z.B. Sizilianisch)...">
-            <datalist id="category-datalist"></datalist>
-            
-            <textarea id="move-note-input" class="note-input" placeholder="Notiz zu dieser Stellung..."></textarea>
-            
-            <!-- Stockfish Analysis Section -->
-            <div class="analysis-section hidden" id="analysis-section">
-                <div class="explorer-header">
-                    <i class="fas fa-robot"></i>
-                    <span>Stockfish Analyse</span>
-                    <span class="analysis-depth" id="analysis-depth"></span>
-                </div>
-                <div class="explorer-moves" id="analysis-moves">
-                    <div class="explorer-placeholder">Analysiere...</div>
+                <div class="add-mode-buttons">
+                    <button class="analyze-btn" onclick="toggleAnalysisMenu()" id="btn-analysis">
+                        <i class="fas fa-search"></i> Analyse
+                    </button>
+                    <button class="analyze-btn" onclick="toggleDatabaseMenu()" id="btn-database">
+                        <i class="fas fa-database"></i> Datenbank
+                    </button>
                 </div>
             </div>
             
-            <!-- Opening Explorer Section -->
-            <div class="explorer-section">
-                <div class="explorer-header">
-                    <i class="fas fa-database"></i>
-                    <span>Lichess Datenbank</span>
-                    <span class="explorer-stats" id="explorer-stats"></span>
+            <!-- All orderable sections container -->
+            <div id="add-mode-sections">
+                <!-- Category/Name input -->
+                <div class="add-mode-element" data-element="name">
+                    <input type="text" id="category-input" list="category-datalist" placeholder="Kategorie (z.B. Sizilianisch)...">
+                    <datalist id="category-datalist"></datalist>
                 </div>
-                <div class="explorer-moves" id="explorer-moves">
-                    <div class="explorer-placeholder">Züge spielen...</div>
+                
+                <!-- Stockfish Analysis Section -->
+                <div class="add-mode-element" data-element="stockfish">
+                    <div class="analysis-section hidden" id="analysis-section">
+                        <div class="explorer-header">
+                            <i class="fas fa-robot"></i>
+                            <span>Stockfish Analyse</span>
+                            <div class="analysis-controls">
+                                <select id="analysis-lines-select" onchange="updateAnalysisLines(this.value)">
+                                    <option value="1">1 Linie</option>
+                                    <option value="2">2 Linien</option>
+                                    <option value="3">3 Linien</option>
+                                    <option value="4">4 Linien</option>
+                                    <option value="5" selected>5 Linien</option>
+                                </select>
+                                <select id="analysis-depth-select" onchange="updateAnalysisDepth(this.value)">
+                                    <option value="12">Tiefe 12</option>
+                                    <option value="16">Tiefe 16</option>
+                                    <option value="20" selected>Tiefe 20</option>
+                                    <option value="24">Tiefe 24</option>
+                                    <option value="28">Tiefe 28</option>
+                                    <option value="99">∞ Unbegrenzt</option>
+                                </select>
+                                <span class="analysis-depth" id="analysis-depth"></span>
+                            </div>
+                        </div>
+                        <div class="explorer-moves" id="analysis-moves">
+                            <div class="explorer-placeholder">Analysiere...</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Opening Explorer Section -->
+                <div class="add-mode-element" data-element="database">
+                    <div class="explorer-section hidden" id="explorer-section">
+                        <div class="explorer-header">
+                            <i class="fas fa-database"></i>
+                            <span>Lichess Datenbank</span>
+                            <span class="explorer-stats" id="explorer-stats"></span>
+                        </div>
+                        <div class="explorer-moves" id="explorer-moves">
+                            <div class="explorer-placeholder">Züge spielen...</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- PGN/Moves display -->
+                <div class="add-mode-element" data-element="moves">
+                    <div id="pgn-display"></div>
+                </div>
+                
+                <!-- Notes textarea -->
+                <div class="add-mode-element" data-element="notes">
+                    <textarea id="move-note-input" class="note-input" placeholder="Notiz zu dieser Stellung..."></textarea>
                 </div>
             </div>
-            
-            <div id="pgn-display"></div>
             <div class="action-group">
                 <button class="action-btn" onclick="saveLine()" id="save-btn">Speichern</button>
                 <button class="action-btn secondary" onclick="cancelAdd()">Abbrechen</button>
@@ -326,7 +370,10 @@
 
 <!-- Context Menu for Moves -->
 <div id="move-context-menu" class="context-menu hidden">
-    <div class="context-menu-item" onclick="executeDeleteMove()">
+    <div class="context-menu-item" id="ctx-view-position" onclick="executeViewPosition()">
+        <i class="fas fa-eye"></i> Position anzeigen
+    </div>
+    <div class="context-menu-item" id="ctx-delete-move" onclick="executeDeleteMove()">
         <i class="fas fa-trash"></i> Zug löschen
     </div>
     <div class="context-menu-item" id="ctx-add-annotation" onclick="executeAddAnnotation()">

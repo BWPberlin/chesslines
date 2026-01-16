@@ -1,92 +1,158 @@
+
+// --- STOCKFISH 17.1 ENGINE INTEGRATION ---
+// Uses Web Worker approach for the single-threaded WASM build
+
+let engine = null;
+let isEngineRunning = false;
+let engineInitialized = false;
+
 // --- BOT GAME VARIABLES ---
 let botGameActive = false;
 let botElo = 1500;
 let selectedBotLine = null;
-let isBotThinking = false; // LOCK VARIABLE FOR SYNC
-let botGameMoves = []; // Track moves with evaluations
-let botGameEvaluations = []; // Store evaluations for each position
+let isBotThinking = false;
+let botGameMoves = [];
+let botGameEvaluations = [];
 
-// --- STOCKFISH ENGINE LOGIC (SYNC FIX) ---
-let engine = null;
-let isEngineRunning = false;
-
-// HARD RESET FUNCTION
-function restartEngine() {
-    if(engine && engine.terminate) engine.terminate();
+// Initialize Stockfish Web Worker
+async function initializeStockfish() {
+    if (engineInitialized) {
+        return;
+    }
     
-    return new Promise((resolve, reject) => {
-        Stockfish().then(sf => {
-            engine = sf;
-            
-            engine.addMessageListener(line => {
-                if (typeof line !== 'string') return;
+    try {
+        console.log('Creating Stockfish Web Worker...');
+        
+        // Create a Web Worker from the Stockfish JS file
+        engine = new Worker('stockfish/stockfish-17.1-single-a496a04.js');
+        
+        // Set up message handler
+        engine.onmessage = function(event) {
+            handleEngineMessage(event.data);
+        };
+        
+        engine.onerror = function(error) {
+            console.error('Stockfish Worker error:', error);
+        };
+        
+        engineInitialized = true;
+        console.log('Stockfish Worker created successfully');
+        
+        // Send initial UCI command
+        sendEngineCommand('uci');
+        
+    } catch (err) {
+        console.error('Failed to initialize Stockfish:', err);
+        engineInitialized = false;
+    }
+}
+
+// Send UCI command to engine
+function sendEngineCommand(command) {
+    if (!engine) {
+        console.warn('Engine not initialized');
+        return;
+    }
+    
+    console.log('Sending command:', command);
+    engine.postMessage(command);
+}
+
+// Handle all messages from the engine
+function handleEngineMessage(line) {
+    if (typeof line !== 'string') return;
+    
+    // console.log('Engine:', line);
+    
+    // ANALYSIS MODE - handle MultiPV results
+    if (analysisActive && line.startsWith('info') && line.includes(' pv ')) {
+        handleAnalysisMessage(line);
+    }
+    
+    // EVALUATION LOGIC (Only if NOT in bot mode and not in analysis)
+    if (!analysisActive && mode !== 'bot' && line.startsWith('info') && line.includes('score')) { 
+        parseEvaluation(line); 
+    }
+    
+    // EVALUATION TRACKING FOR BOT MODE
+    if (mode === 'bot' && line.startsWith('info') && line.includes('score') && line.includes('depth')) {
+        const tokens = line.split(' ');
+        const depthIdx = tokens.indexOf('depth');
+        const depth = depthIdx !== -1 ? parseInt(tokens[depthIdx + 1]) : 0;
+        
+        // Only track evaluations at reasonable depth
+        if (depth >= 10) {
+            const scoreIdx = tokens.indexOf('score');
+            if (scoreIdx !== -1) {
+                const type = tokens[scoreIdx + 1];
+                let value = parseInt(tokens[scoreIdx + 2]);
                 
-                // EVALUATION LOGIC (Only if NOT in bot mode)
-                if (mode !== 'bot' && line.startsWith('info') && line.includes('score')) { 
-                    parseEvaluation(line); 
+                if (type === 'mate') {
+                    value = value > 0 ? 10000 : -10000;
                 }
                 
-                // EVALUATION TRACKING FOR BOT MODE
-                if (mode === 'bot' && line.startsWith('info') && line.includes('score') && line.includes('depth')) {
-                    const tokens = line.split(' ');
-                    const depthIdx = tokens.indexOf('depth');
-                    const depth = depthIdx !== -1 ? parseInt(tokens[depthIdx + 1]) : 0;
-                    
-                    // Only track evaluations at reasonable depth
-                    if (depth >= 10) {
-                        const scoreIdx = tokens.indexOf('score');
-                        if (scoreIdx !== -1) {
-                            const type = tokens[scoreIdx + 1];
-                            let value = parseInt(tokens[scoreIdx + 2]);
-                            
-                            if (type === 'mate') {
-                                value = value > 0 ? 10000 : -10000;
-                            }
-                            
-                            // Adjust for side to move
-                            if (game.turn() === 'b') value = -value;
-                            botGameEvaluations.push(value);
-                        }
-                    }
-                }
-                
-                // BOT MOVE LOGIC
-                if (mode === 'bot' && line.startsWith('bestmove')) {
-                    const best = line.split(' ')[1];
-                    if(best) {
-                        const moveResult = game.move({ from: best.substring(0,2), to: best.substring(2,4), promotion: 'q' });
-                        
-                        if (moveResult) {
-                            board.position(game.fen(), false);
-                            
-                            setTimeout(() => {
-                                playSound('move');
-                                highlightLastMove({ from: best.substring(0,2), to: best.substring(2,4) });
-                                
-                                setTimeout(() => {
-                                    isBotThinking = false;
-                                    updateBotStatus("Dein Zug", "neutral");
-                                    
-                                    if(game.game_over()) {
-                                        setTimeout(() => { 
-                                            showBotGameResults();
-                                        }, 500);
-                                    }
-                                }, 150);
-                            }, 100);
-                        }
-                    }
-                }
+                // Adjust for side to move
+                if (game.turn() === 'b') value = -value;
+                botGameEvaluations.push(value);
+            }
+        }
+    }
+    
+    // BOT MOVE LOGIC
+    if (mode === 'bot' && line.startsWith('bestmove')) {
+        const best = line.split(' ')[1];
+        if (best) {
+            const moveResult = game.move({ 
+                from: best.substring(0, 2), 
+                to: best.substring(2, 4), 
+                promotion: 'q' 
             });
             
-            engine.postMessage('uci');
-            resolve();
-        }).catch(reject);
+            if (moveResult) {
+                board.position(game.fen(), false);
+                
+                setTimeout(() => {
+                    playSound('move');
+                    highlightLastMove({ from: best.substring(0, 2), to: best.substring(2, 4) });
+                    
+                    setTimeout(() => {
+                        isBotThinking = false;
+                        updateBotStatus("Dein Zug", "neutral");
+                        
+                        if (game.game_over()) {
+                            setTimeout(() => { 
+                                showBotGameResults();
+                            }, 500);
+                        }
+                    }, 150);
+                }, 100);
+            }
+        }
+    }
+}
+
+// Restart engine (terminate old, create new)
+function restartEngine() {
+    return new Promise((resolve, reject) => {
+        if (engine) {
+            engine.terminate();
+            engine = null;
+            engineInitialized = false;
+        }
+        
+        initializeStockfish()
+            .then(() => {
+                // Wait a bit for engine to be ready
+                setTimeout(resolve, 100);
+            })
+            .catch(reject);
     });
 }
 
 async function initEngine() {
-    if(!engine) await restartEngine();
+    if (!engineInitialized) {
+        await restartEngine();
+    }
 }
 
 function toggleEngine() {
@@ -98,21 +164,28 @@ function toggleEngine() {
         bar.classList.remove('hidden');
     } else {
         bar.classList.add('hidden');
-        if(engine) engine.postMessage('stop');
+        sendEngineCommand('stop');
     }
 }
 
 function startEvaluation() {
+    // If full analysis (MultiPV) is active, do not start the simple evaluation
+    // as it will interrupt the analysis 'go' command and prevent results.
+    if (analysisActive) {
+        console.log('startEvaluation skipped because analysisActive is true');
+        return;
+    }
+
     if (!isEngineRunning || !engine) return;
-    engine.postMessage('stop');
-    engine.postMessage('position fen ' + game.fen());
-    engine.postMessage('go depth 15');
+    sendEngineCommand('stop');
+    sendEngineCommand('position fen ' + game.fen());
+    sendEngineCommand('go depth 15');
 }
 
-// --- NEUE FUNKTIONEN FÜR BOT SPIEL ---
+// --- BOT GAME FUNCTIONS ---
 function startBotSetup(lineId) {
     const line = repertoire[currentSide].find(l => l.id === lineId);
-    if(!line) return;
+    if (!line) return;
     selectedBotLine = line;
     
     // Update UI immediately
@@ -122,7 +195,7 @@ function startBotSetup(lineId) {
     
     switchUI('bot-setup-mode');
     
-    // FORCE RESTART ENGINE TO CLEAR OLD STATE (in background)
+    // Restart engine to clear old state (in background)
     restartEngine().catch(err => {
         console.error('Engine restart failed:', err);
     });
@@ -134,9 +207,8 @@ function updateEloDisplay(val) {
 }
 
 function launchBotGame() {
-    if(!selectedBotLine) return;
+    if (!selectedBotLine) return;
     
-    // Ensure engine is ready before starting
     const startGame = () => {
         game.load_pgn(selectedBotLine.pgn);
         board.position(game.fen());
@@ -152,7 +224,7 @@ function launchBotGame() {
         updateBotStatus("Spiel gestartet", "neutral");
         
         // Initial configuration for the game
-        engine.postMessage('ucinewgame');
+        sendEngineCommand('ucinewgame');
         
         if (game.turn().charAt(0) !== currentSide.charAt(0)) {
             updateBotStatus("Bot zieht...", "neutral");
@@ -176,22 +248,21 @@ function launchBotGame() {
 }
 
 function makeBotMove() {
-    if(!botGameActive || !engine) return;
-    if(game.game_over()) return;
+    if (!botGameActive || !engine) return;
+    if (game.game_over()) return;
     
-    // More accurate ELO to skill level mapping
-    // Based on Stockfish skill level documentation and testing
+    // ELO to skill level mapping
     let skill;
     if (botElo <= 800) {
         skill = 0;
     } else if (botElo <= 1100) {
-        skill = Math.floor((botElo - 800) / 75); // 0-4
+        skill = Math.floor((botElo - 800) / 75);
     } else if (botElo <= 1400) {
-        skill = Math.floor(4 + (botElo - 1100) / 60); // 5-9
+        skill = Math.floor(4 + (botElo - 1100) / 60);
     } else if (botElo <= 1700) {
-        skill = Math.floor(9 + (botElo - 1400) / 50); // 10-15
+        skill = Math.floor(9 + (botElo - 1400) / 50);
     } else if (botElo <= 2200) {
-        skill = Math.floor(15 + (botElo - 1700) / 125); // 16-19
+        skill = Math.floor(15 + (botElo - 1700) / 125);
     } else {
         skill = 20;
     }
@@ -199,15 +270,14 @@ function makeBotMove() {
     const clampedSkill = Math.max(0, Math.min(20, skill));
     
     // Adjust move time based on strength
-    // Stronger bots get more time to think
     let moveTime;
     if (botElo < 1000) {
         moveTime = 50;
     } else if (botElo < 1500) {
         moveTime = 100;
-    } else if (botElo < 2000) {        moveTime = 200;
+    } else if (botElo < 2000) {
+        moveTime = 200;
     } else if (botElo < 2200) {
-
         moveTime = 300;
     } else if (botElo < 2500) {
         moveTime = 500;
@@ -215,19 +285,19 @@ function makeBotMove() {
         moveTime = 800;
     }
     
-    engine.postMessage('stop');
-    engine.postMessage(`setoption name Skill Level value ${clampedSkill}`);
+    sendEngineCommand('stop');
+    sendEngineCommand(`setoption name Skill Level value ${clampedSkill}`);
     
     // Add UCI Elo option for better strength calibration
     if (botElo <= 2800) {
-        engine.postMessage(`setoption name UCI_LimitStrength value true`);
-        engine.postMessage(`setoption name UCI_Elo value ${botElo}`);
+        sendEngineCommand(`setoption name UCI_LimitStrength value true`);
+        sendEngineCommand(`setoption name UCI_Elo value ${botElo}`);
     } else {
-        engine.postMessage(`setoption name UCI_LimitStrength value false`);
+        sendEngineCommand(`setoption name UCI_LimitStrength value false`);
     }
     
-    engine.postMessage('position fen ' + game.fen());
-    engine.postMessage(`go movetime ${moveTime}`);
+    sendEngineCommand('position fen ' + game.fen());
+    sendEngineCommand(`go movetime ${moveTime}`);
 }
 
 function updateBotStatus(msg, type) {
@@ -239,14 +309,14 @@ function updateBotStatus(msg, type) {
 function stopBotGame() {
     // If game is still active, show results as draw
     if (botGameActive && !game.game_over()) {
-        showBotGameResults(true); // Pass true to indicate manual stop
+        showBotGameResults(true);
         return;
     }
     
     botGameActive = false;
     isBotThinking = false;
     mode = 'view';
-    if(isEngineRunning) document.getElementById('eval-bar-container').classList.remove('hidden');
+    if (isEngineRunning) document.getElementById('eval-bar-container').classList.remove('hidden');
     switchUI('view-mode');
     resetBoardSearch();
 }
@@ -266,7 +336,8 @@ function parseEvaluation(line) {
         } else {
             score = value / 100;
             document.getElementById('eval-score').innerText = (score > 0 ? '+' : '') + score.toFixed(1);
-            if (score > 5) score = 5; if (score < -5) score = -5;
+            if (score > 5) score = 5;
+            if (score < -5) score = -5;
         }
         updateEvalBar(score);
     }
@@ -274,18 +345,24 @@ function parseEvaluation(line) {
 
 function updateEvalBar(score) {
     let percent = 50;
-    if (score === 100) percent = 100; else if (score === -100) percent = 0;
+    if (score === 100) percent = 100;
+    else if (score === -100) percent = 0;
     else percent = 50 + (score * 10);
-    if (percent > 100) percent = 100; if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    if (percent < 0) percent = 0;
 
     const fill = document.getElementById('eval-fill');
     const text = document.getElementById('eval-score');
     fill.style.height = percent + '%';
     
     if (score >= 0) {
-        text.style.top = 'auto'; text.style.bottom = '5px'; text.style.color = '#333'; 
+        text.style.top = 'auto';
+        text.style.bottom = '5px';
+        text.style.color = '#333'; 
     } else {
-        text.style.top = '5px'; text.style.bottom = 'auto'; text.style.color = '#f8fafc'; 
+        text.style.top = '5px';
+        text.style.bottom = 'auto';
+        text.style.color = '#f8fafc'; 
     }
 }
 
@@ -296,12 +373,10 @@ function calculateAccuracy(evaluations, isPlayerWhite) {
     let totalLoss = 0;
     let moveCount = 0;
     
-    // Analyze consecutive moves to calculate centipawn loss
     for (let i = 1; i < evaluations.length; i++) {
         const prevEval = evaluations[i - 1];
         const currEval = evaluations[i];
         
-        // Calculate eval loss from perspective
         let loss = 0;
         if (isPlayerWhite) {
             loss = Math.max(0, prevEval - currEval);
@@ -316,13 +391,7 @@ function calculateAccuracy(evaluations, isPlayerWhite) {
     if (moveCount === 0) return 95;
     
     const avgLoss = totalLoss / moveCount;
-    
-    // Stricter accuracy calculation using exponential decay
-    // This penalizes mistakes more heavily
-    // avgLoss ~25 = ~85%, ~50 = ~71%, ~100 = ~51%, ~200 = ~26%, ~300 = ~13%
     let accuracy = 100 * Math.exp(-avgLoss / 150);
-    
-    // Clamp between 0 and 100
     accuracy = Math.max(0, Math.min(100, accuracy));
     
     return Math.round(accuracy);
@@ -334,20 +403,16 @@ function showBotGameResults(manualStop = false) {
     const title = document.getElementById('bot-results-title');
     const subtitle = document.getElementById('bot-results-subtitle');
     
-    // Determine winner
-    let winner = '';
     let iconClass = '';
     let iconHtml = '';
     
     if (manualStop) {
-        // Game was manually stopped - show as draw
         title.innerText = 'Spiel unterbrochen';
         subtitle.innerText = 'Du hast das Spiel beendet';
         iconClass = 'good';
         iconHtml = '<i class="fas fa-handshake"></i>';
     } else if (game.in_checkmate()) {
         if (game.turn() === 'w') {
-            winner = 'Schwarz gewinnt!';
             if (currentSide === 'black') {
                 title.innerText = 'Du hast gewonnen!';
                 subtitle.innerText = 'Schachmatt! Hervorragend gespielt!';
@@ -360,7 +425,6 @@ function showBotGameResults(manualStop = false) {
                 iconHtml = '<i class="fas fa-robot"></i>';
             }
         } else {
-            winner = 'Weiß gewinnt!';
             if (currentSide === 'white') {
                 title.innerText = 'Du hast gewonnen!';
                 subtitle.innerText = 'Schachmatt! Hervorragend gespielt!';
@@ -388,7 +452,6 @@ function showBotGameResults(manualStop = false) {
     icon.className = `results-icon ${iconClass}`;
     icon.innerHTML = iconHtml;
     
-    // Calculate accuracies
     const isPlayerWhite = currentSide === 'white';
     const playerAccuracy = calculateAccuracy(botGameEvaluations, isPlayerWhite);
     const botAccuracy = calculateAccuracy(botGameEvaluations, !isPlayerWhite);
@@ -404,7 +467,7 @@ function closeBotResults() {
     botGameActive = false;
     isBotThinking = false;
     mode = 'view';
-    if(isEngineRunning) document.getElementById('eval-bar-container').classList.remove('hidden');
+    if (isEngineRunning) document.getElementById('eval-bar-container').classList.remove('hidden');
     switchUI('view-mode');
     resetBoardSearch();
 }

@@ -71,13 +71,25 @@ function playSound(type) {
     else if (type === 'error') { osc.type = 'sine'; osc.frequency.setValueAtTime(150, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.2); gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime); gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2); osc.start(); osc.stop(audioCtx.currentTime + 0.2); }
 }
 
-let userSettings = JSON.parse(localStorage.getItem('chessSettingsPro')) || { theme: 'dark', sound: true, coords: true, highlight: true, autoRepeat: false, animSpeed: 200, boardColor: 'green', pieceStyle: 'wikipedia', sortMode: 'similarity', treeView: false };
+let userSettings = JSON.parse(localStorage.getItem('chessSettingsPro')) || { theme: 'dark', sound: true, coords: true, highlight: true, autoRepeat: false, animSpeed: 200, boardColor: 'green', pieceStyle: 'wikipedia', sortMode: 'similarity', treeView: false, editorOrder: ['name', 'stockfish', 'database', 'moves', 'notes'], analysisOpen: false, databaseOpen: true };
 
 // Line statistics tracking
 let lineStats = JSON.parse(localStorage.getItem('chessLineStats')) || {};
 
 // Safety Reset for old bad settings
 if(userSettings.pieceStyle === 'dubrovnik') { userSettings.pieceStyle = 'wikipedia'; localStorage.setItem('chessSettingsPro', JSON.stringify(userSettings)); }
+// Migration: Convert old createModeOrder to new editorOrder array
+const defaultOrder = ['name', 'stockfish', 'database', 'moves', 'notes'];
+if(!userSettings.editorOrder || !Array.isArray(userSettings.editorOrder)) {
+    // Convert old format to new
+    if(userSettings.createModeOrder === 'database-first') {
+        userSettings.editorOrder = ['name', 'database', 'stockfish', 'moves', 'notes'];
+    } else {
+        userSettings.editorOrder = defaultOrder;
+    }
+    delete userSettings.createModeOrder;
+    localStorage.setItem('chessSettingsPro', JSON.stringify(userSettings));
+}
 
 let expandedCategories = {}; 
 let isPaused = false; 
@@ -110,6 +122,9 @@ function updateSettingsUI() {
     if(document.getElementById(`opt-anim-${userSettings.animSpeed}`)) document.getElementById(`opt-anim-${userSettings.animSpeed}`).classList.add('selected');
     if(document.getElementById(`opt-board-${userSettings.boardColor}`)) document.getElementById(`opt-board-${userSettings.boardColor}`).classList.add('selected');
     if(document.getElementById(`opt-piece-${userSettings.pieceStyle}`)) document.getElementById(`opt-piece-${userSettings.pieceStyle}`).classList.add('selected');
+    
+    // Render editor order list
+    renderEditorOrderList();
 }
 function applySettings() {
     if (userSettings.theme === 'light') document.body.classList.add('light-mode'); else document.body.classList.remove('light-mode');
@@ -138,6 +153,79 @@ function toggleSortMode() {
 function setAnimSpeed(speed) { userSettings.animSpeed = speed; saveSettings(); applySettings(); }
 function setBoardColor(c) { userSettings.boardColor = c; saveSettings(); applySettings(); }
 function setPieceTheme(s) { userSettings.pieceStyle = s; saveSettings(); applySettings(); }
+
+// Move an item in the editor order list up or down
+function moveOrderItem(key, direction) {
+    const order = userSettings.editorOrder;
+    const index = order.indexOf(key);
+    if (index === -1) return;
+    
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= order.length) return;
+    
+    // Swap elements
+    [order[index], order[newIndex]] = [order[newIndex], order[index]];
+    saveSettings();
+    renderEditorOrderList();
+}
+
+// Render the order list in settings UI
+function renderEditorOrderList() {
+    const container = document.getElementById('editor-order-list');
+    if (!container) return;
+    
+    const labels = {
+        'name': 'Kategorie',
+        'stockfish': 'Stockfish Analyse',
+        'database': 'Datenbank',
+        'moves': 'Züge',
+        'notes': 'Notizen'
+    };
+    
+    container.innerHTML = userSettings.editorOrder.map(key => `
+        <div class="order-item" data-key="${key}">
+            <i class="fas fa-grip-lines"></i>
+            <span>${labels[key]}</span>
+            <div class="order-arrows">
+                <button onclick="moveOrderItem('${key}', -1)"><i class="fas fa-chevron-up"></i></button>
+                <button onclick="moveOrderItem('${key}', 1)"><i class="fas fa-chevron-down"></i></button>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Apply the user's preferred order to the add-mode UI
+function applyCreateModeOrder() {
+    const container = document.getElementById('add-mode-sections');
+    const buttonsContainer = document.querySelector('.add-mode-buttons');
+    if (!container) return;
+    
+    const order = userSettings.editorOrder;
+    
+    // Reorder sections based on user preference
+    order.forEach(key => {
+        const element = container.querySelector(`[data-element="${key}"]`);
+        if (element) {
+            container.appendChild(element);
+        }
+    });
+    
+    // Reorder buttons based on stockfish/database order
+    if (buttonsContainer) {
+        const stockfishIndex = order.indexOf('stockfish');
+        const databaseIndex = order.indexOf('database');
+        const btnAnalysis = document.getElementById('btn-analysis');
+        const btnDatabase = document.getElementById('btn-database');
+        
+        if (btnAnalysis && btnDatabase) {
+            if (databaseIndex < stockfishIndex) {
+                buttonsContainer.insertBefore(btnDatabase, btnAnalysis);
+            } else {
+                buttonsContainer.insertBefore(btnAnalysis, btnDatabase);
+            }
+        }
+    }
+}
 function saveSettings() { localStorage.setItem('chessSettingsPro', JSON.stringify(userSettings)); }
 function openSettings() { switchUI('settings-mode'); updateSettingsUI(); }
 function closeSettings() { switchUI('view-mode'); }
@@ -235,6 +323,8 @@ let currentAnnotations = {};
 let currentDisplayAnnotations = {}; 
 let currentTrainingAnnotations = {}; 
 let trainingQueue = []; let currentTrainLine = null; let currentMoveIndex = 0;
+let addModePreviewIndex = -1; // -1 means at the end (current position)
+let addModeFullHistory = []; // Store full history to enable forward navigation after going back
 
 function getCleanFen() { return game.fen().split(' ').slice(0, 4).join(' '); }
 
@@ -251,6 +341,9 @@ function onDrop (source, target) {
         setTimeout(() => {
             if (mode === 'add') { 
                 currentDisplayAnnotations = {}; // Clear annotations when making a new move
+                // Update full history and reset preview index to end
+                addModeFullHistory = game.history({ verbose: true });
+                addModePreviewIndex = addModeFullHistory.length - 1;
                 updatePgnDisplay(); 
                 loadNoteForCurrentPos();
                 updateOpeningExplorer(); // Update explorer with new position
@@ -461,8 +554,11 @@ function renderList(filterPgn = null) {
                 const repetitionClass = isInRepetition ? 'in-repetition' : '';
                 div.className = `line-item ${repetitionClass}`;
                 
+                // Render individual moves for context menu support
+                const movesHtml = renderLineMovesWithContextMenu(line);
+                
                 div.innerHTML = `
-                    <span onclick="loadLinePreview(${line.id})">${line.pgn}</span>
+                    <span class="line-moves" onclick="loadLinePreview(${line.id})">${movesHtml}</span>
                     <div class="line-actions">
                         <button onclick="toggleRepetitionFromList(${line.id})" class="toggle-rep" title="Wiederholung">
                             <i class="${isInRepetition ? 'fas' : 'far'} fa-bookmark" style="${isInRepetition ? 'color:var(--warning)' : ''}"></i>
@@ -478,6 +574,56 @@ function renderList(filterPgn = null) {
         groupDiv.appendChild(contentDiv); 
         list.appendChild(groupDiv);
     });
+}
+
+// Render line moves as individual spans with context menu support
+function renderLineMovesWithContextMenu(line) {
+    const tempGame = new Chess();
+    if (!line.pgn) return '<span class="view-move">Startposition</span>';
+    
+    tempGame.load_pgn(line.pgn);
+    const history = tempGame.history();
+    if (history.length === 0) return '<span class="view-move">Startposition</span>';
+    
+    let html = '';
+    let moveNumber = 1;
+    
+    for (let i = 0; i < history.length; i++) {
+        if (i % 2 === 0) {
+            html += `<span class="view-move-num">${moveNumber}.</span>`;
+            moveNumber++;
+        }
+        
+        // Check if this move has an annotation
+        const annotation = line.annotations && line.annotations[i] ? line.annotations[i] : '';
+        
+        html += `<span class="view-move" data-line-id="${line.id}" data-move-index="${i}" oncontextmenu="showViewContextMenu(event, ${line.id}, ${i})">${history[i]}${annotation}</span> `;
+    }
+    
+    return html;
+}
+
+// Find a line that starts with the given path of moves
+function findLineByPath(pathMoves) {
+    const lines = repertoire[currentSide] || [];
+    for (const line of lines) {
+        const tempGame = new Chess();
+        tempGame.load_pgn(line.pgn);
+        const history = tempGame.history();
+        
+        // Check if the line starts with (or equals) this path
+        if (history.length >= pathMoves.length) {
+            let matches = true;
+            for (let i = 0; i < pathMoves.length; i++) {
+                if (history[i] !== pathMoves[i]) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) return line;
+        }
+    }
+    return null;
 }
 
 // --- NEW TREE HELPER FUNCTIONS ---
@@ -531,9 +677,10 @@ function buildCategoryTree(lines, repetitionSet) {
         const currentPath = [...pathSoFar, node.move];
         const moveId = `tree-move-${moveIdCounter++}`;
         const pathAttr = currentPath.join(',');
+        const escapedPath = pathAttr.replace(/'/g, "\\'");
 
-        // Render the Move with path data
-        html += `<span class="tree-move" id="${moveId}" data-path="${pathAttr}" onclick="previewTreeMove('${node.move}', ${node.ply})">${moveLabel}</span>`;
+        // Render the Move with path data and context menu support
+        html += `<span class="tree-move" id="${moveId}" data-path="${pathAttr}" onclick="previewTreeMove('${node.move}', ${node.ply})" oncontextmenu="showTreeMoveContextMenu(event, '${escapedPath}')">${moveLabel}</span>`;
 
         // Render Line Markers (Folder icons for actions)
         if (hasLineEnd) {
@@ -687,18 +834,45 @@ function editLine(id) { const line = repertoire[currentSide].find(l => l.id === 
 // UPDATED PREPARE EDITOR (ACCEPTS SHAPES)
 function prepareEditor(title, pgn, category, commentsData, shapesData, annotationsData) { 
     mode = 'add'; switchUI('add-mode'); 
+    
+    // Apply user's preferred section order
+    applyCreateModeOrder();
+    
     document.getElementById('category-input').value = category; 
     currentComments = JSON.parse(JSON.stringify(commentsData)); 
     currentShapes = JSON.parse(JSON.stringify(shapesData || {})); // Shapes laden
     currentAnnotations = JSON.parse(JSON.stringify(annotationsData || {})); // Annotations laden
     currentDisplayAnnotations = {}; // Reset display annotations
     
-    // Reset analysis state when entering add mode
-    analysisActive = false;
-    document.getElementById('analysis-section').classList.add('hidden');
-    document.querySelector('.analyze-btn')?.classList.remove('active');
+    // Restore analysis and database panel states from settings
+    const btns = document.querySelectorAll('.analyze-btn');
+    
+    // Restore Stockfish analysis state
+    analysisActive = userSettings.analysisOpen || false;
+    if (analysisActive) {
+        document.getElementById('analysis-section').classList.remove('hidden');
+        if (btns[0]) btns[0].classList.add('active');
+        runStockfishAnalysis();
+    } else {
+        document.getElementById('analysis-section').classList.add('hidden');
+        if (btns[0]) btns[0].classList.remove('active');
+    }
+    
+    // Restore database state
+    databaseActive = userSettings.databaseOpen !== undefined ? userSettings.databaseOpen : true;
+    if (databaseActive) {
+        document.getElementById('explorer-section').classList.remove('hidden');
+        if (btns[1]) btns[1].classList.add('active');
+    } else {
+        document.getElementById('explorer-section').classList.add('hidden');
+        if (btns[1]) btns[1].classList.remove('active');
+    }
     
     const datalist = document.getElementById('category-datalist'); datalist.innerHTML = ''; Object.keys(getGroupedLines(currentSide)).forEach(cat => { const opt = document.createElement('option'); opt.value = cat; datalist.appendChild(opt); }); game.reset(); if (pgn) game.load_pgn(pgn); board.position(game.fen()); board.orientation(currentSide); const history = game.history({verbose:true}); 
+    
+    // Initialize keyboard navigation state
+    addModeFullHistory = history.slice(); // Copy the history
+    addModePreviewIndex = history.length > 0 ? history.length - 1 : -1;
     
     // Build display annotations from loaded annotations
     Object.keys(currentAnnotations).forEach(index => {
@@ -717,7 +891,10 @@ function updatePgnDisplay() {
     const pgnEl = document.getElementById('pgn-display'); 
     pgnEl.innerHTML = ''; // Clear content
     
-    const history = game.history({ verbose: true });
+    // Use full history in add mode (to preserve moves after going back)
+    const history = (mode === 'add' && addModeFullHistory.length > 0) 
+        ? addModeFullHistory 
+        : game.history({ verbose: true });
     
     if (history.length === 0) {
         pgnEl.innerText = "Züge spielen...";
@@ -738,11 +915,12 @@ function updatePgnDisplay() {
         const moveSpan = document.createElement('span');
         moveSpan.innerText = move.san;
         moveSpan.className = 'move-span';
+        if (i === addModePreviewIndex) moveSpan.classList.add('active-move');
         moveSpan.dataset.index = i;
         // Left-click: preview board position after this move in add mode
         moveSpan.addEventListener('click', () => {
             if (mode !== 'add') return;
-            previewToMoveIndex(i, history);
+            previewToMoveIndex(i, addModeFullHistory);
         });
         moveSpan.addEventListener('contextmenu', (e) => {
             e.preventDefault();
@@ -767,6 +945,8 @@ function updatePgnDisplay() {
 // Jump the game/board to the position after the given move index (0-based)
 function previewToMoveIndex(index, movesList) {
     if (!Array.isArray(movesList) || movesList.length === 0) return;
+    // Track the preview index
+    addModePreviewIndex = index;
     // Reset and replay up to and including the selected move
     game.reset();
     for (let j = 0; j <= index && j < movesList.length; j++) {
@@ -785,10 +965,39 @@ function previewToMoveIndex(index, movesList) {
     loadNoteForCurrentPos();
     drawShapes();
     
+    // Update PGN display to highlight active move
+    updatePgnDisplay();
+    
     // Optional: engine evaluation if running and not in bot/train
     if (isEngineRunning && mode !== 'bot' && mode !== 'train') {
         setTimeout(startEvaluation, 50);
     }
+    
+    // Update analysis if active
+    if (analysisActive) {
+        runStockfishAnalysis();
+    }
+}
+
+// Navigate to start position (before any moves)
+function goToStartPosition() {
+    if (mode !== 'add') return;
+    addModePreviewIndex = -1;
+    game.reset();
+    board.position(game.fen(), false);
+    $('#board .square-55d63').removeClass('highlight-square');
+    currentDisplayAnnotations = {};
+    loadNoteForCurrentPos();
+    drawShapes();
+    updatePgnDisplay();
+    if (isEngineRunning) setTimeout(startEvaluation, 50);
+    if (analysisActive) runStockfishAnalysis();
+}
+
+// Navigate to end position (latest move)
+function goToEndPosition(movesList) {
+    if (mode !== 'add' || !Array.isArray(movesList) || movesList.length === 0) return;
+    previewToMoveIndex(movesList.length - 1, movesList);
 }
 
 // --- UNDO FUNCTION ---
@@ -851,9 +1060,18 @@ function cancelAdd() {
     if (analysisActive) {
         analysisActive = false;
         document.getElementById('analysis-section').classList.add('hidden');
-        document.querySelector('.analyze-btn')?.classList.remove('active');
-        if (analysisEngine) analysisEngine.postMessage('stop');
+        sendEngineCommand('stop');
+        sendEngineCommand('setoption name MultiPV value 1');
     }
+    // Always hide eval bar when leaving add mode (unless engine setting is on)
+    if (!isEngineRunning) {
+        document.getElementById('eval-bar-container').classList.add('hidden');
+    }
+    // Reset button states
+    const btns = document.querySelectorAll('.analyze-btn');
+    if (btns[0]) btns[0].classList.remove('active');
+    if (btns[1]) btns[1].classList.remove('active');
+    
     switchUI('view-mode'); 
     resetBoardSearch(); 
 }
@@ -1259,21 +1477,20 @@ function getSquareFromCoords(clientX, clientY) {
     return null;
 }
 
-// UPDATED: Use Capture phase or just handle bubbling correctly for pieces
+// UPDATED: Use Capture phase to ensure right-click works on all squares including pieces
 boardWrapper.addEventListener('mousedown', (e) => {
     // Disable drawing on touch devices (phones/tablets)
     if (isTouchDevice) return;
     if(e.button === 2) { // Right Click
         isDrawing = true;
         startSquare = getSquareFromCoords(e.clientX, e.clientY);
-        // Don't prevent default here immediately or it might block context menu logic check later
-        // But we do prevent propagation to pieces if needed? 
-        // Actually, just letting it bubble is fine, as long as we catch it here.
+        e.preventDefault(); // Prevent any default behavior on right-click
+        e.stopPropagation(); // Stop event from reaching piece handlers
     }
-});
+}, true); // Use capture phase
 
 // Add this to prevent default context menu on the board
-boardWrapper.addEventListener('contextmenu', (e) => { e.preventDefault(); return false; });
+boardWrapper.addEventListener('contextmenu', (e) => { e.preventDefault(); return false; }, true);
 
 boardWrapper.addEventListener('mouseup', (e) => {
     if (isTouchDevice) return;
@@ -1290,8 +1507,9 @@ boardWrapper.addEventListener('mouseup', (e) => {
         isDrawing = false;
         startSquare = null;
         e.preventDefault();
+        e.stopPropagation();
     }
-});
+}, true); // Use capture phase
 
 // NEW FUNCTION: CLEAR SHAPES
 function clearShapesForCurrentPos() {
@@ -1302,6 +1520,9 @@ function clearShapesForCurrentPos() {
 
 // Keyboard shortcut: Shift+Z clears all arrows for current position
 document.addEventListener('keydown', (e) => {
+    // Don't handle shortcuts when typing in input fields
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    
     if ((e.key === 'Z' || e.key === 'z') && e.shiftKey) {
         clearShapesForCurrentPos();
         // brief visual cue on the board
@@ -1311,6 +1532,39 @@ document.addEventListener('keydown', (e) => {
             setTimeout(() => boardEl.classList.remove('flash-clear-shapes'), 220);
         }
         e.preventDefault();
+        return;
+    }
+    
+    // Arrow key navigation in add mode
+    if (mode === 'add') {
+        const fullHistory = addModeFullHistory;
+        
+        if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            if (fullHistory.length === 0) return;
+            
+            // If at start, stay at start
+            if (addModePreviewIndex === -1) return;
+            
+            // If at position 0, go to start
+            if (addModePreviewIndex === 0) {
+                goToStartPosition();
+            } else {
+                // Go one move back
+                previewToMoveIndex(addModePreviewIndex - 1, fullHistory);
+            }
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            if (fullHistory.length === 0) return;
+            
+            // If at start (-1), go to first move
+            if (addModePreviewIndex === -1) {
+                previewToMoveIndex(0, fullHistory);
+            } else if (addModePreviewIndex < fullHistory.length - 1) {
+                // Go one move forward
+                previewToMoveIndex(addModePreviewIndex + 1, fullHistory);
+            }
+        }
     }
 });
 
@@ -1506,16 +1760,26 @@ window.addEventListener('resize', () => {
 
 // --- CONTEXT MENU LOGIC ---
 let contextMenuTargetIndex = null;
+let viewModeEditLineId = null; // Track which line is being edited in view mode
+let treeMoveContextPath = null; // Track path for tree move context menu
 
 function showContextMenu(x, y, index) {
     contextMenuTargetIndex = index;
+    viewModeEditLineId = null; // Reset view mode editing
+    treeMoveContextPath = null; // Reset tree path
     const menu = document.getElementById('move-context-menu');
     // Reset submenu visibility each time
     const submenu = document.getElementById('annotation-submenu');
     if (submenu) submenu.classList.add('hidden');
-    // Show annotation option only in add mode
+    // Show delete option in add mode
+    const deleteItem = document.getElementById('ctx-delete-move');
+    if (deleteItem) deleteItem.classList.remove('hidden');
+    // Show annotation option in add mode
     const addItem = document.getElementById('ctx-add-annotation');
-    if (addItem) addItem.classList.toggle('hidden', mode !== 'add');
+    if (addItem) addItem.classList.remove('hidden');
+    // Hide view position in add mode (not needed there)
+    const viewPosItem = document.getElementById('ctx-view-position');
+    if (viewPosItem) viewPosItem.classList.add('hidden');
     
     // Position menu, adjusting if it would go off-screen
     menu.style.left = '0px';
@@ -1547,11 +1811,222 @@ function showContextMenu(x, y, index) {
     menu.style.top = finalY + 'px';
 }
 
+// Show context menu for view mode (list of openings)
+function showViewContextMenu(e, lineId, moveIndex) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    contextMenuTargetIndex = moveIndex;
+    viewModeEditLineId = lineId;
+    treeMoveContextPath = null; // Reset tree path
+    
+    const menu = document.getElementById('move-context-menu');
+    const submenu = document.getElementById('annotation-submenu');
+    if (submenu) submenu.classList.add('hidden');
+    
+    // Show delete option in view mode
+    const deleteItem = document.getElementById('ctx-delete-move');
+    if (deleteItem) deleteItem.classList.remove('hidden');
+    
+    // Show annotation option in view mode too
+    const addItem = document.getElementById('ctx-add-annotation');
+    if (addItem) addItem.classList.remove('hidden');
+    
+    // Show view position option in view mode
+    const viewPosItem = document.getElementById('ctx-view-position');
+    if (viewPosItem) viewPosItem.classList.remove('hidden');
+    
+    // Position menu
+    menu.style.left = '0px';
+    menu.style.top = '0px';
+    menu.classList.remove('hidden');
+    
+    const menuRect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    let finalX = e.clientX;
+    let finalY = e.clientY;
+    
+    if (e.clientX + menuRect.width > viewportWidth) {
+        finalX = viewportWidth - menuRect.width - 10;
+    }
+    if (e.clientY + menuRect.height > viewportHeight) {
+        finalY = viewportHeight - menuRect.height - 10;
+    }
+    if (finalX < 10) finalX = 10;
+    if (finalY < 10) finalY = 10;
+    
+    menu.style.left = finalX + 'px';
+    menu.style.top = finalY + 'px';
+}
+
+// Show context menu for tree view moves
+function showTreeMoveContextMenu(e, path) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    treeMoveContextPath = path; // Store the path for viewing position
+    
+    // Find the first line that matches this path for delete/annotation operations
+    const pathMoves = path.split(',');
+    const matchingLine = findLineByPath(pathMoves);
+    
+    if (matchingLine) {
+        viewModeEditLineId = matchingLine.id;
+        contextMenuTargetIndex = pathMoves.length - 1; // Index of the clicked move
+    } else {
+        viewModeEditLineId = null;
+        contextMenuTargetIndex = null;
+    }
+    
+    const menu = document.getElementById('move-context-menu');
+    const submenu = document.getElementById('annotation-submenu');
+    if (submenu) submenu.classList.add('hidden');
+    
+    // Show all options (delete and annotation work on the first matching line)
+    const deleteItem = document.getElementById('ctx-delete-move');
+    if (deleteItem) deleteItem.classList.toggle('hidden', !matchingLine);
+    const addItem = document.getElementById('ctx-add-annotation');
+    if (addItem) addItem.classList.toggle('hidden', !matchingLine);
+    
+    // Show view position option
+    const viewPosItem = document.getElementById('ctx-view-position');
+    if (viewPosItem) viewPosItem.classList.remove('hidden');
+    
+    // Position menu
+    menu.style.left = '0px';
+    menu.style.top = '0px';
+    menu.classList.remove('hidden');
+    
+    const menuRect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    let finalX = e.clientX;
+    let finalY = e.clientY;
+    
+    if (e.clientX + menuRect.width > viewportWidth) {
+        finalX = viewportWidth - menuRect.width - 10;
+    }
+    if (e.clientY + menuRect.height > viewportHeight) {
+        finalY = viewportHeight - menuRect.height - 10;
+    }
+    if (finalX < 10) finalX = 10;
+    if (finalY < 10) finalY = 10;
+    
+    menu.style.left = finalX + 'px';
+    menu.style.top = finalY + 'px';
+}
+
 function executeDeleteMove() {
     if (contextMenuTargetIndex !== null) {
-        deleteMoveFrom(contextMenuTargetIndex);
+        if (viewModeEditLineId !== null) {
+            // View mode: edit the stored line directly
+            deleteMoveFromLine(viewModeEditLineId, contextMenuTargetIndex);
+        } else {
+            // Add mode: edit current game
+            deleteMoveFrom(contextMenuTargetIndex);
+        }
     }
     document.getElementById('move-context-menu').classList.add('hidden');
+}
+
+// View position after a specific move (view mode or tree mode)
+function executeViewPosition() {
+    // Handle tree view context menu
+    if (treeMoveContextPath !== null) {
+        const moves = treeMoveContextPath.split(',');
+        game.reset();
+        let lastMove = null;
+        for (const moveSan of moves) {
+            lastMove = game.move(moveSan);
+        }
+        board.position(game.fen());
+        if (lastMove) highlightLastMove(lastMove);
+        updateViewSearch();
+        if (isEngineRunning) startEvaluation();
+        document.getElementById('move-context-menu').classList.add('hidden');
+        return;
+    }
+    
+    // Handle normal list view context menu
+    if (viewModeEditLineId === null || contextMenuTargetIndex === null) return;
+    
+    const line = repertoire[currentSide].find(l => l.id === viewModeEditLineId);
+    if (!line) return;
+    
+    const tempGame = new Chess();
+    tempGame.load_pgn(line.pgn);
+    const history = tempGame.history({ verbose: true });
+    
+    // Update the main board to show this position
+    game.reset();
+    for (let i = 0; i <= contextMenuTargetIndex && i < history.length; i++) {
+        game.move(history[i]);
+    }
+    board.position(game.fen());
+    
+    // Highlight the last move
+    if (history[contextMenuTargetIndex]) {
+        highlightLastMove(history[contextMenuTargetIndex]);
+    }
+    
+    // Update view search to show matching lines
+    updateViewSearch();
+    
+    // Run engine evaluation if enabled
+    if (isEngineRunning) startEvaluation();
+    
+    document.getElementById('move-context-menu').classList.add('hidden');
+}
+
+// Delete move from a stored line (view mode)
+function deleteMoveFromLine(lineId, index) {
+    const line = repertoire[currentSide].find(l => l.id === lineId);
+    if (!line) return;
+    
+    const tempGame = new Chess();
+    tempGame.load_pgn(line.pgn);
+    const history = tempGame.history({ verbose: true });
+    
+    // Rebuild game up to the deleted move
+    tempGame.reset();
+    for (let i = 0; i < index; i++) {
+        tempGame.move(history[i]);
+    }
+    
+    // Update line PGN
+    line.pgn = tempGame.pgn();
+    
+    // Clean up annotations for deleted moves
+    if (line.annotations) {
+        const newAnnotations = {};
+        for (let i = 0; i < index; i++) {
+            if (line.annotations[i]) {
+                newAnnotations[i] = line.annotations[i];
+            }
+        }
+        line.annotations = newAnnotations;
+    }
+    
+    // Clean up comments for positions that no longer exist
+    if (line.comments) {
+        const newComments = {};
+        tempGame.reset();
+        for (let i = 0; i <= index && i < history.length; i++) {
+            const fen = tempGame.fen().split(' ').slice(0, 4).join(' ');
+            if (line.comments[fen]) {
+                newComments[fen] = line.comments[fen];
+            }
+            if (history[i]) tempGame.move(history[i]);
+        }
+        line.comments = newComments;
+    }
+    
+    saveData();
+    renderList(game.pgn());
+    playSound('move');
 }
 
 function deleteMoveFrom(index) {
@@ -1625,10 +2100,36 @@ function executeAddAnnotation() {
 }
 
 function pickAnnotation(symbol) {
-    if (contextMenuTargetIndex === null || mode !== 'add') return;
-    annotateMoveAtIndex(contextMenuTargetIndex, symbol);
+    if (contextMenuTargetIndex === null) return;
+    
+    if (viewModeEditLineId !== null) {
+        // View mode: edit the stored line directly
+        annotateLineMove(viewModeEditLineId, contextMenuTargetIndex, symbol);
+    } else if (mode === 'add') {
+        // Add mode: edit current game
+        annotateMoveAtIndex(contextMenuTargetIndex, symbol);
+    }
+    
     const menu = document.getElementById('move-context-menu');
     if (menu) menu.classList.add('hidden');
+}
+
+// Add annotation to a stored line (view mode)
+function annotateLineMove(lineId, index, annotation) {
+    const line = repertoire[currentSide].find(l => l.id === lineId);
+    if (!line) return;
+    
+    if (!line.annotations) line.annotations = {};
+    
+    // Toggle annotation if same one is clicked again
+    if (line.annotations[index] === annotation) {
+        delete line.annotations[index];
+    } else {
+        line.annotations[index] = annotation;
+    }
+    
+    saveData();
+    renderList(game.pgn());
 }
 
 function annotateMoveAtIndex(index, annotation) {
@@ -1753,24 +2254,77 @@ function closeTrainingResults() {
 
 // --- STOCKFISH ANALYSIS MENU ---
 let analysisActive = false;
-let analysisEngine = null;
 let analysisResults = [];
+let currentAnalysisFen = '';
+let analysisDepth = 20;
+let analysisLines = 5;
+
+// --- DATABASE MENU ---
+let databaseActive = true; // Default to shown
+
+function toggleDatabaseMenu() {
+    databaseActive = !databaseActive;
+    const section = document.getElementById('explorer-section');
+    const btns = document.querySelectorAll('.analyze-btn');
+    const btn = btns[1]; // Second button is database
+    
+    // Save state to settings
+    userSettings.databaseOpen = databaseActive;
+    localStorage.setItem('chessSettingsPro', JSON.stringify(userSettings));
+    
+    if (databaseActive) {
+        section.classList.remove('hidden');
+        btn.classList.add('active');
+        updateOpeningExplorer();
+    } else {
+        section.classList.add('hidden');
+        btn.classList.remove('active');
+    }
+}
 
 function toggleAnalysisMenu() {
     analysisActive = !analysisActive;
     const section = document.getElementById('analysis-section');
-    const btn = document.querySelector('.analyze-btn');
+    const btns = document.querySelectorAll('.analyze-btn');
+    const btn = btns[0]; // First button is analysis
+    const evalBar = document.getElementById('eval-bar-container');
+    
+    // Save state to settings
+    userSettings.analysisOpen = analysisActive;
+    localStorage.setItem('chessSettingsPro', JSON.stringify(userSettings));
     
     if (analysisActive) {
         section.classList.remove('hidden');
         btn.classList.add('active');
+        evalBar.classList.remove('hidden');
         runStockfishAnalysis();
     } else {
         section.classList.add('hidden');
         btn.classList.remove('active');
-        if (analysisEngine) {
-            analysisEngine.postMessage('stop');
+        // Hide eval bar only if engine evaluation is not running
+        if (!isEngineRunning) {
+            evalBar.classList.add('hidden');
         }
+        sendEngineCommand('stop');
+        // Reset MultiPV to 1 for normal evaluation
+        sendEngineCommand('setoption name MultiPV value 1');
+    }
+}
+
+function updateAnalysisDepth(value) {
+    analysisDepth = parseInt(value);
+    // Re-run analysis with new depth if active
+    if (analysisActive) {
+        runStockfishAnalysis();
+    }
+}
+
+function updateAnalysisLines(value) {
+    analysisLines = parseInt(value);
+    // Clear old results and re-run analysis with new lines count if active
+    if (analysisActive) {
+        analysisResults = [];
+        runStockfishAnalysis();
     }
 }
 
@@ -1783,87 +2337,98 @@ async function runStockfishAnalysis() {
     container.innerHTML = '<div class="explorer-loading"><i class="fas fa-spinner fa-spin"></i> Analysiere...</div>';
     depthSpan.innerText = '';
     
-    // Initialize engine if needed
-    if (!analysisEngine) {
-        try {
-            analysisEngine = await Stockfish();
-            analysisEngine.postMessage('uci');
-            await new Promise(resolve => setTimeout(resolve, 100));
-        } catch (e) {
-            container.innerHTML = '<div class="explorer-error"><i class="fas fa-exclamation-triangle"></i> Engine nicht verfügbar</div>';
-            return;
+    const fen = game.fen();
+    currentAnalysisFen = fen;
+    analysisResults = [];
+    
+    // Ensure engine is initialized
+    await initEngine();
+    
+    // Configure and start analysis with MultiPV
+    sendEngineCommand('stop');
+    sendEngineCommand(`setoption name MultiPV value ${analysisLines}`);
+    sendEngineCommand(`position fen ${fen}`);
+    
+    // Use selected depth (99 = infinite)
+    if (analysisDepth >= 99) {
+        sendEngineCommand('go infinite');
+    } else {
+        sendEngineCommand(`go depth ${analysisDepth}`);
+    }
+}
+
+// Called from handleEngineMessage in stockfish-wrapper.js
+function handleAnalysisMessage(line) {
+    if (!analysisActive) return;
+    
+    const tokens = line.split(' ');
+    
+    const depthIdx = tokens.indexOf('depth');
+    const depth = depthIdx !== -1 ? parseInt(tokens[depthIdx + 1]) : 0;
+    
+    // Only process if depth is reasonable
+    if (depth < 1) return;
+    
+    const multipvIdx = tokens.indexOf('multipv');
+    const multipv = multipvIdx !== -1 ? parseInt(tokens[multipvIdx + 1]) : 1;
+    
+    const scoreIdx = tokens.indexOf('score');
+    let score = null;
+    let isMate = false;
+    if (scoreIdx !== -1) {
+        const type = tokens[scoreIdx + 1];
+        const value = parseInt(tokens[scoreIdx + 2]);
+        if (type === 'mate') {
+            score = value;
+            isMate = true;
+        } else if (type === 'cp') {
+            score = value / 100;
         }
     }
     
-    const fen = game.fen();
-    analysisResults = [];
-    let currentDepth = 0;
+    const pvIdx = tokens.indexOf('pv');
+    const pvMoves = pvIdx !== -1 ? tokens.slice(pvIdx + 1) : [];
     
-    // Set up message listener for this analysis
-    const messageHandler = (line) => {
-        if (typeof line !== 'string') return;
+    if (pvMoves.length > 0) {
+        // Convert UCI move to SAN
+        const uciMove = pvMoves[0];
+        let sanMove = uciToSan(uciMove, currentAnalysisFen);
         
-        // Parse info lines with multipv
-        if (line.startsWith('info') && line.includes('multipv') && line.includes('pv')) {
-            const tokens = line.split(' ');
+        // Convert full PV to SAN
+        let pvSan = convertPvToSan(pvMoves, currentAnalysisFen);
+        
+        // Update results for this multipv line
+        analysisResults[multipv - 1] = {
+            move: sanMove,
+            uci: uciMove,
+            score: score,
+            isMate: isMate,
+            depth: depth,
+            pv: pvMoves.slice(0, 16),
+            pvSan: pvSan
+        };
+        
+        // Update display
+        renderAnalysisMoves();
+        document.getElementById('analysis-depth').innerText = `Tiefe ${depth}`;
+        
+        // Update eval bar with best line (multipv 1)
+        if (multipv === 1 && score !== null) {
+            let evalScore = score;
+            // Adjust for side to move
+            if (game.turn() === 'b') evalScore = -evalScore;
             
-            const depthIdx = tokens.indexOf('depth');
-            const depth = depthIdx !== -1 ? parseInt(tokens[depthIdx + 1]) : 0;
-            
-            const multipvIdx = tokens.indexOf('multipv');
-            const multipv = multipvIdx !== -1 ? parseInt(tokens[multipvIdx + 1]) : 1;
-            
-            const scoreIdx = tokens.indexOf('score');
-            let score = null;
-            let isMate = false;
-            if (scoreIdx !== -1) {
-                const type = tokens[scoreIdx + 1];
-                const value = parseInt(tokens[scoreIdx + 2]);
-                if (type === 'mate') {
-                    score = value;
-                    isMate = true;
-                } else if (type === 'cp') {
-                    score = value / 100;
-                }
+            if (isMate) {
+                evalScore = evalScore > 0 ? 100 : -100;
+                document.getElementById('eval-score').innerText = `M${Math.abs(score)}`;
+            } else {
+                document.getElementById('eval-score').innerText = (evalScore > 0 ? '+' : '') + evalScore.toFixed(1);
+                if (evalScore > 5) evalScore = 5;
+                if (evalScore < -5) evalScore = -5;
             }
-            
-            const pvIdx = tokens.indexOf('pv');
-            const pvMoves = pvIdx !== -1 ? tokens.slice(pvIdx + 1) : [];
-            
-            if (depth > 0 && pvMoves.length > 0) {
-                // Convert UCI move to SAN
-                const uciMove = pvMoves[0];
-                let sanMove = uciToSan(uciMove, fen);
-                
-                // Update results for this multipv line
-                if (depth >= currentDepth) {
-                    currentDepth = depth;
-                    analysisResults[multipv - 1] = {
-                        move: sanMove,
-                        uci: uciMove,
-                        score: score,
-                        isMate: isMate,
-                        depth: depth,
-                        pv: pvMoves.slice(0, 5)
-                    };
-                    
-                    // Update display
-                    if (multipv === 1 || depth >= 8) {
-                        renderAnalysisMoves();
-                        depthSpan.innerText = `Tiefe ${depth}`;
-                    }
-                }
-            }
+            updateEvalBar(evalScore);
         }
-    };
-    
-    analysisEngine.addMessageListener(messageHandler);
-    
-    // Configure for multipv analysis
-    analysisEngine.postMessage('stop');
-    analysisEngine.postMessage('setoption name MultiPV value 5');
-    analysisEngine.postMessage(`position fen ${fen}`);
-    analysisEngine.postMessage('go depth 18');
+    }
 }
 
 function uciToSan(uci, fen) {
@@ -1881,6 +2446,31 @@ function uciToSan(uci, fen) {
     }
 }
 
+function convertPvToSan(pvMoves, startFen) {
+    const tempGame = new Chess(startFen);
+    const sanMoves = [];
+    
+    for (let i = 0; i < Math.min(pvMoves.length, 16); i++) {
+        const uci = pvMoves[i];
+        const from = uci.substring(0, 2);
+        const to = uci.substring(2, 4);
+        const promotion = uci.length > 4 ? uci[4] : undefined;
+        
+        try {
+            const move = tempGame.move({ from, to, promotion });
+            if (move) {
+                sanMoves.push(move.san);
+            } else {
+                break;
+            }
+        } catch (e) {
+            break;
+        }
+    }
+    
+    return sanMoves;
+}
+
 function renderAnalysisMoves() {
     const container = document.getElementById('analysis-moves');
     const turn = game.turn(); // 'w' or 'b'
@@ -1892,7 +2482,8 @@ function renderAnalysisMoves() {
     
     container.innerHTML = '';
     
-    analysisResults.filter(r => r).forEach((result, index) => {
+    // Only show up to analysisLines results
+    analysisResults.filter(r => r).slice(0, analysisLines).forEach((result, index) => {
         if (!result) return;
         
         // Adjust score for black's perspective
@@ -1913,13 +2504,17 @@ function renderAnalysisMoves() {
             evalClass = 'neutral';
         }
         
+        // Build PV string (skip first move as it's already shown)
+        const pvLine = result.pvSan ? result.pvSan.slice(1).join(' ') : '';
+        
         const moveDiv = document.createElement('div');
-        moveDiv.className = 'explorer-move';
+        moveDiv.className = 'explorer-move analysis-line';
         moveDiv.onclick = () => playAnalysisMove(result.uci);
         
         moveDiv.innerHTML = `
             <div class="explorer-move-san">${result.move}</div>
             <div class="analysis-move-eval ${evalClass}">${evalText}</div>
+            <div class="analysis-pv">${pvLine}</div>
         `;
         
         container.appendChild(moveDiv);
