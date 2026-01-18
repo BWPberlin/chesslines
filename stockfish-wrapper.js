@@ -62,25 +62,37 @@ function sendEngineCommand(command) {
 function handleEngineMessage(line) {
     if (typeof line !== 'string') return;
     
-    // console.log('Engine:', line);
-    
+    // --- FIX START: Configure Engine Memory on Startup ---
+    // This intercepts the 'uciok' signal to set safe memory limits immediately.
+    // Without this, Stockfish 17 tries to allocate too much RAM and crashes WASM.
+    if (line === 'uciok') {
+        console.log('Configuring Stockfish memory...');
+        sendEngineCommand('setoption name Threads value 1'); // Ensure single thread
+        sendEngineCommand('setoption name Hash value 256'); // Limit to 16MB (Safe for web)
+        sendEngineCommand('isready');
+        return;
+    }
+    // --- FIX END ---
+
     // ANALYSIS MODE - handle MultiPV results
     if (analysisActive && line.startsWith('info') && line.includes(' pv ')) {
         handleAnalysisMessage(line);
     }
     
     // EVALUATION LOGIC (Only if NOT in bot mode and not in analysis)
+    // Updates the evaluation bar during normal board usage
     if (!analysisActive && mode !== 'bot' && line.startsWith('info') && line.includes('score')) { 
         parseEvaluation(line); 
     }
     
     // EVALUATION TRACKING FOR BOT MODE
+    // Captures evaluation history to calculate accuracy at end of game
     if (mode === 'bot' && line.startsWith('info') && line.includes('score') && line.includes('depth')) {
         const tokens = line.split(' ');
         const depthIdx = tokens.indexOf('depth');
         const depth = depthIdx !== -1 ? parseInt(tokens[depthIdx + 1]) : 0;
         
-        // Only track evaluations at reasonable depth
+        // Only track evaluations at reasonable depth (>= 10) to avoid noise
         if (depth >= 10) {
             const scoreIdx = tokens.indexOf('score');
             if (scoreIdx !== -1) {
@@ -91,7 +103,7 @@ function handleEngineMessage(line) {
                     value = value > 0 ? 10000 : -10000;
                 }
                 
-                // Adjust for side to move
+                // Adjust score for side to move so the graph/stats are consistent
                 if (game.turn() === 'b') value = -value;
                 botGameEvaluations.push(value);
             }
@@ -99,6 +111,7 @@ function handleEngineMessage(line) {
     }
     
     // BOT MOVE LOGIC
+    // Detects when the bot has finished thinking and plays the move
     if (mode === 'bot' && line.startsWith('bestmove')) {
         const best = line.split(' ')[1];
         if (best) {
