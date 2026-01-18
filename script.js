@@ -1021,16 +1021,22 @@ function prepareEditor(title, pgn, category, commentsData, shapesData, annotatio
     // Restore analysis and database panel states from settings
     const btnAnalysis = document.getElementById('btn-analysis');
     const btnDatabase = document.getElementById('btn-database');
+    const evalBar = document.getElementById('eval-bar-container');
     
     // Restore Stockfish analysis state
     analysisActive = userSettings.analysisOpen || false;
     if (analysisActive) {
         document.getElementById('analysis-section').classList.remove('hidden');
         if (btnAnalysis) btnAnalysis.classList.add('active');
+        evalBar.classList.remove('hidden');
         runStockfishAnalysis();
     } else {
         document.getElementById('analysis-section').classList.add('hidden');
         if (btnAnalysis) btnAnalysis.classList.remove('active');
+        // Hide eval bar only if engine is not running globally
+        if (!isEngineRunning) {
+            evalBar.classList.add('hidden');
+        }
     }
     
     // Restore database state

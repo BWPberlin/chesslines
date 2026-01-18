@@ -661,6 +661,8 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
 #add-mode .analysis-section, #add-mode .explorer-section { margin-bottom: 0; }
 #add-mode #category-input { margin-bottom: 0; }
 
+/* Ensure action buttons in add mode always have gap to content above */
+#add-mode .action-group { margin-top: var(--add-mode-gap); }
 
 /* Mobile fixed action bar: keep bottom buttons always reachable */
 @media (max-width: 768px) {
