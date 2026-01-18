@@ -24,6 +24,14 @@ body {
     transition: background-color 0.4s ease;
 }
 
+input::placeholder {
+  color: white;
+}
+
+textarea::placeholder {
+  color: white;
+}
+
 /* --- LAYOUT --- */
 .main-container { display: flex; width: 100%; max-width: 100%; margin: 0; padding: 15px; height: 100vh; align-items: stretch; }
 
@@ -36,7 +44,7 @@ body {
 .board-wrapper {
     display: flex; gap: 10px; height: 100%; width: 100%; position: relative; z-index: 10;
     max-width: 85vh; max-height: 85vh; align-items: stretch; justify-content: center;
-    position: relative; /* Wichtig für SVG Overlay */
+    position: relative; /* Wichtig für SVG Overlay und Eval Bar */
 }
 
 #board {
@@ -96,14 +104,23 @@ body {
 .board-theme-teal .white-1e1d7 { background-color: #ccfbf1; color: #0d9488; }
 .board-theme-teal .black-3c85d { background-color: #0d9488; color: #ccfbf1; }
 
+/* ROUNDED BOARD CORNERS */
+.board-rounded { border-radius: 8px; overflow: hidden; }
+.board-rounded .square-55d63 { /* All squares default */ }
+/* Target corner squares by position using nth-child */
+.board-rounded [data-square="a8"] { border-top-left-radius: 8px; }
+.board-rounded [data-square="h8"] { border-top-right-radius: 8px; }
+.board-rounded [data-square="a1"] { border-bottom-left-radius: 8px; }
+.board-rounded [data-square="h1"] { border-bottom-right-radius: 8px; }
 
 /* STOCKFISH EVAL BAR */
 #eval-bar-container {
     width: 30px; background: #333; 
-    border-radius: 4px; overflow: hidden; position: relative;
+    border-radius: 4px; overflow: hidden; position: absolute;
+    left: -40px; top: 0; bottom: 0;
     box-shadow: inset 0 0 5px rgba(0,0,0,0.5);
     transition: opacity 0.3s;
-    flex-shrink: 0; display: flex; flex-direction: column; justify-content: flex-end;
+    display: flex; flex-direction: column; justify-content: flex-end;
     border: 1px solid var(--border-color);
 }
 #eval-fill {
@@ -120,6 +137,20 @@ body {
 }
 
 .highlight-square { box-shadow: inset 0 0 0 4px var(--highlight-last); }
+
+/* Drag highlighting */
+#board .drag-source { 
+    box-shadow: inset 0 0 0 100px rgba(0, 0, 0, 0.15) !important; 
+}
+#board .drag-hover { 
+    box-shadow: inset 0 0 0 100px rgba(0, 0, 0, 0.15) !important; 
+}
+
+/* Disable chessboard.js default hover highlighting during drag */
+#board.is-dragging .highlight1-32417:not(.drag-source):not(.drag-hover),
+#board.is-dragging .highlight2-9c5d2:not(.drag-source):not(.drag-hover) {
+    box-shadow: none !important;
+}
 
 .resizer {
     width: 12px; cursor: col-resize; background-color: transparent; display: flex; justify-content: center; align-items: center;
@@ -141,7 +172,7 @@ h2 i { color: var(--primary); }
 .settings-btn { background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; transition: 0.3s; }
 .settings-btn:hover { color: var(--text-main); transform: rotate(90deg); }
 
-#view-mode, #settings-mode, #add-mode, #selection-mode, #train-mode, #bot-setup-mode, #bot-play-mode { display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 25px; }
+#view-mode, #settings-mode, #add-mode, #selection-mode, #train-mode, #bot-setup-mode, #bot-play-mode, #import-pgn-mode { display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 25px; }
 .scrollable-list, .settings-container, #selection-list { flex-grow: 1; overflow-y: auto; min-height: 0; padding-right: 8px; margin-bottom: 20px; }
 
 .action-group { margin-top: auto; flex-shrink: 0; display: flex; gap: 12px; flex-wrap: wrap; }
@@ -281,6 +312,9 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
 .toggle-switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 20px; height: 20px; background: #fff; border-radius: 50%; transition: 0.3s; }
 .toggle-row.active .toggle-switch { background: var(--primary); } .toggle-row.active .toggle-switch::after { left: 22px; }
 .color-dot { width: 20px; height: 20px; border-radius: 50%; display: inline-block; }
+.view-mode-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: var(--add-mode-gap); flex-shrink: 0; }
+.view-mode-header .color-switch { margin-bottom: 0; flex: 1; }
+.view-mode-header .analyze-btn { padding: 10px 12px; }
 .color-switch { display: flex; background: var(--bg-input); border-radius: var(--radius); padding: 4px; margin-bottom: var(--add-mode-gap); flex-shrink: 0; }
 .color-btn { flex: 1; background: transparent; border: none; color: var(--text-muted); padding: 10px; cursor: pointer; font-weight: 600; border-radius: 6px; font-size: 0.95rem; }
 .color-btn.active { background-color: var(--bg-panel); color: var(--text-main); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -576,13 +610,16 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
     /* Enable touch dragging on the board and pieces */
     #board { touch-action: none; -ms-touch-action: none; }
     #board img { -webkit-user-drag: none; touch-action: none; }
+    
+    /* Bot style buttons responsive grid */
+    .bot-style-options { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* Mobile-specific tweaks for add/view/train modes */
 @media (max-width: 768px) {
     /* PGN/move list in Add Mode should scroll so played moves are visible */
     #add-mode #pgn-display {
-        max-height: calc(28vh);
+        max-height: calc(40vh);
         overflow-y: auto;
         padding: 10px;
         border-radius: 8px;
@@ -619,7 +656,7 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
 #add-mode-sections { display: flex; flex-direction: column; gap: var(--add-mode-gap); }
 #add-mode-sections .add-mode-element { padding: calc(var(--add-mode-gap) / 4) 0; }
 #add-mode-sections .add-mode-element > *:first-child { margin-bottom: 0; margin-top: 0; }
-#add-mode #pgn-display { max-height: 30vh; overflow-y: auto; -webkit-overflow-scrolling: touch; margin-bottom: 0; }
+#add-mode #pgn-display { max-height: 50vh; overflow-y: auto; -webkit-overflow-scrolling: touch; margin-bottom: 0; }
 #add-mode .note-input { max-height: 24vh; overflow-y: auto; margin-bottom: 0; margin-top: 0; }
 #add-mode .analysis-section, #add-mode .explorer-section { margin-bottom: 0; }
 #add-mode #category-input { margin-bottom: 0; }
@@ -822,31 +859,43 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
 .explorer-bar-segment {
     height: 100%;
     transition: width 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 600;
+    overflow: hidden;
+    white-space: nowrap;
 }
 
 .explorer-bar-white {
     background: #e0e0e0;
+    color: #333;
 }
 
 .explorer-bar-draw {
     background: #94a3b8;
+    color: #fff;
 }
 
 .explorer-bar-black {
     background: #4a5568;
+    color: #fff;
 }
 
 .explorer-move-stats {
     display: flex;
-    gap: 8px;
-    font-size: 0.75rem;
+    gap: 6px;
+    font-size: 0.7rem;
     color: var(--text-muted);
-    min-width: 80px;
+    min-width: 50px;
     justify-content: flex-end;
+    align-items: center;
 }
 
 .explorer-move-games {
     font-weight: 600;
+    color: var(--text-muted);
 }
 
 .explorer-loading {
@@ -884,6 +933,62 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
     font-style: italic;
     margin-top: 10px;
     line-height: 1.4;
+}
+
+/* Bot style selection */
+.bot-style-options {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.bot-style-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 8px;
+    background: var(--bg-input);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--text-muted);
+}
+
+.bot-style-btn i {
+    font-size: 1.2rem;
+}
+
+.bot-style-btn span {
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.bot-style-btn:hover {
+    border-color: var(--primary);
+    color: var(--text-main);
+}
+
+.bot-style-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}
+
+.bot-style-description {
+    font-size: 0.8rem;
+    color: white;
+    text-align: center;
+    min-height: 2.4em;
+}
+
+.bot-play-style {
+    font-size: 0.85rem;
+    color: var(--primary);
+    font-weight: 600;
+    margin-bottom: 8px;
 }
 
 /* Settings mode header */
@@ -1067,7 +1172,8 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
     overflow-y: auto;
     font-size: 0.9rem;
     color: var(--text-main);
-    min-height: 60px;
+    min-height: 120px;
+    line-height: 1.8;
 }
 
 /* Selection mode header */
@@ -1317,3 +1423,51 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
 
 /* Hide list items when in tree mode */
 .category-content.tree-mode .line-item { display: none; } /*Tree
+
+/* --- PGN IMPORT MODE --- */
+#import-pgn-mode { overflow-y: auto; }
+#import-mode-sections { display: flex; flex-direction: column; gap: var(--add-mode-gap); }
+#import-mode-sections .add-mode-element { padding: calc(var(--add-mode-gap) / 4) 0; }
+#import-mode-sections .add-mode-element > *:first-child { margin-bottom: 0; margin-top: 0; }
+#import-category-input { margin-bottom: 0; }
+
+.import-pgn-textarea {
+    min-height: 180px;
+    max-height: 40vh;
+    resize: vertical;
+    font-family: 'Fira Code', 'Monaco', monospace;
+    margin-bottom: 0;
+    margin-top: 0;
+}
+
+.import-preview-section {
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 0;
+}
+
+.import-preview-section .explorer-moves {
+    max-height: 25vh;
+    overflow-y: auto;
+}
+
+/* Import lines use same styling as home page .line-item */
+#import-lines-list .line-item {
+    margin-bottom: 0;
+}
+
+.import-line-edit-input {
+    flex: 1;
+    background: var(--bg-panel);
+    border: 2px solid var(--primary);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--text-main);
+    font-family: 'Fira Code', 'Monaco', monospace;
+    font-size: 0.85rem;
+    outline: none;
+}
+
+#import-execute-btn:disabled {
+    cursor: not-allowed;
+}

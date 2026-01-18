@@ -44,9 +44,14 @@
         </div>
 
         <div id="view-mode">
-            <div class="color-switch">
-                <button class="color-btn active" onclick="setSide('white')">Weiß</button>
-                <button class="color-btn" onclick="setSide('black')">Schwarz</button>
+            <div class="view-mode-header">
+                <div class="color-switch">
+                    <button class="color-btn active" onclick="setSide('white')">Weiß</button>
+                    <button class="color-btn" onclick="setSide('black')">Schwarz</button>
+                </div>
+                <button class="analyze-btn" onclick="toggleEvalBar()" id="btn-eval-bar" title="Bewertung anzeigen">
+                    <i class="fas fa-search"></i>
+                </button>
             </div>
             <div id="search-active-banner" class="search-banner hidden">
                 <span><i class="fas fa-filter search-filter-icon"></i> Filter aktiv</span>
@@ -55,7 +60,44 @@
             <div id="lines-list" class="scrollable-list"></div>
             <div class="action-group">
                 <button class="action-btn" onclick="startAddingLine()"><i class="fas fa-plus"></i> Neu</button>
+                <button class="action-btn secondary" onclick="openImportPgn()"><i class="fas fa-file-import"></i> Import</button>
                 <button class="action-btn secondary" onclick="openSelectionMode()"><i class="fas fa-play"></i> Üben</button>
+            </div>
+        </div>
+
+        <!-- PGN Import Mode -->
+        <div id="import-pgn-mode" class="hidden">
+            <div class="add-mode-header">
+                <h2>PGN Import</h2>
+            </div>
+            
+            <div id="import-filter-banner" class="search-banner hidden">
+                <span><i class="fas fa-filter search-filter-icon"></i> Filter aktiv</span>
+                <button onclick="resetImportFilter()">Reset</button>
+            </div>
+            
+            <div id="import-mode-sections">
+                <!-- Category input -->
+                <div class="add-mode-element">
+                    <input type="text" id="import-category-input" list="category-datalist" placeholder="Kategorie (z.B. Sizilianisch)...">
+                </div>
+                
+                <!-- PGN textarea -->
+                <div class="add-mode-element">
+                    <textarea id="import-pgn-input" class="note-input import-pgn-textarea" placeholder="PGN einfügen"></textarea>
+                </div>
+                
+                <!-- Preview section (like analysis/database sections) -->
+                <div class="add-mode-element">
+                    <div class="import-preview-section hidden" id="import-preview">
+                        <div class="explorer-moves" id="import-lines-list"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="action-group">
+                <button class="action-btn" onclick="executeImportPgn()" id="import-execute-btn" disabled><i class="fas fa-check"></i> Importieren</button>
+                <button class="action-btn secondary" onclick="cancelImportPgn()">Abbrechen</button>
             </div>
         </div>
 
@@ -74,6 +116,29 @@
                     </div>
                 </div>
                 
+                <div class="training-card bot-setup-card">
+                    <div class="category-label">Spielstil (Optional)</div>
+                    <div class="bot-style-options">
+                        <button class="bot-style-btn active" data-style="neutral" onclick="selectBotStyle('neutral')">
+                            <i class="fas fa-balance-scale"></i>
+                            <span>Neutral</span>
+                        </button>
+                        <button class="bot-style-btn" data-style="greedy" onclick="selectBotStyle('greedy')">
+                            <i class="fas fa-coins"></i>
+                            <span>Materialist</span>
+                        </button>
+                        <button class="bot-style-btn" data-style="tactical" onclick="selectBotStyle('tactical')">
+                            <i class="fas fa-bolt"></i>
+                            <span>Taktiker</span>
+                        </button>
+                        <button class="bot-style-btn" data-style="positional" onclick="selectBotStyle('positional')">
+                            <i class="fas fa-chess"></i>
+                            <span>Stratege</span>
+                        </button>
+                    </div>
+                    <div class="bot-style-description" id="bot-style-description">Ausgewogener Spielstil ohne besondere Präferenzen.</div>
+                </div>
+                
                 <div class="training-card">
                     <div class="category-label">Ausgewählte Variante</div>
                     <div id="bot-line-preview" class="bot-line-preview"></div>
@@ -90,6 +155,7 @@
                 <div class="training-card">
                     <div class="category-label">Gegner</div>
                     <div class="active-category-title">Stockfish <span style="font-size:1rem; color:var(--text-muted);" id="bot-play-elo"></span></div>
+                    <div class="bot-play-style" id="bot-play-style"></div>
                     <div class="status-badge neutral" id="bot-status">Viel Erfolg!</div>
                 </div>
             </div>
@@ -126,6 +192,9 @@
                     </div>
                     <div class="toggle-row" onclick="toggleSetting('treeView')" id="setting-treeview-row">
                         <span>Baum-Notation (Tree View)</span><div class="toggle-switch"></div>
+                    </div>
+                    <div class="toggle-row" onclick="toggleSetting('roundedCorners')" id="setting-rounded-row">
+                        <span>Abgerundete Ecken</span><div class="toggle-switch"></div>
                     </div>
                 </div>
                 <div class="settings-section">
@@ -176,7 +245,6 @@
                         <div class="order-item" data-key="stockfish"><i class="fas fa-grip-lines"></i><span>Stockfish Analyse</span><div class="order-arrows"><button onclick="moveOrderItem('stockfish', -1)"><i class="fas fa-chevron-up"></i></button><button onclick="moveOrderItem('stockfish', 1)"><i class="fas fa-chevron-down"></i></button></div></div>
                         <div class="order-item" data-key="database"><i class="fas fa-grip-lines"></i><span>Datenbank</span><div class="order-arrows"><button onclick="moveOrderItem('database', -1)"><i class="fas fa-chevron-up"></i></button><button onclick="moveOrderItem('database', 1)"><i class="fas fa-chevron-down"></i></button></div></div>
                         <div class="order-item" data-key="moves"><i class="fas fa-grip-lines"></i><span>Züge</span><div class="order-arrows"><button onclick="moveOrderItem('moves', -1)"><i class="fas fa-chevron-up"></i></button><button onclick="moveOrderItem('moves', 1)"><i class="fas fa-chevron-down"></i></button></div></div>
-                        <div class="order-item" data-key="notes"><i class="fas fa-grip-lines"></i><span>Notizen</span><div class="order-arrows"><button onclick="moveOrderItem('notes', -1)"><i class="fas fa-chevron-up"></i></button><button onclick="moveOrderItem('notes', 1)"><i class="fas fa-chevron-down"></i></button></div></div>
                     </div>
                 </div>
             </div>
@@ -251,11 +319,6 @@
                 <!-- PGN/Moves display -->
                 <div class="add-mode-element" data-element="moves">
                     <div id="pgn-display"></div>
-                </div>
-                
-                <!-- Notes textarea -->
-                <div class="add-mode-element" data-element="notes">
-                    <textarea id="move-note-input" class="note-input" placeholder="Notiz zu dieser Stellung..."></textarea>
                 </div>
             </div>
             <div class="action-group">
@@ -370,9 +433,6 @@
 
 <!-- Context Menu for Moves -->
 <div id="move-context-menu" class="context-menu hidden">
-    <div class="context-menu-item" id="ctx-view-position" onclick="executeViewPosition()">
-        <i class="fas fa-eye"></i> Position anzeigen
-    </div>
     <div class="context-menu-item" id="ctx-delete-move" onclick="executeDeleteMove()">
         <i class="fas fa-trash"></i> Zug löschen
     </div>
@@ -385,6 +445,8 @@
         <div class="context-menu-item" onclick="pickAnnotation('?!')">?!</div>
         <div class="context-menu-item" onclick="pickAnnotation('∓')">∓</div>
         <div class="context-menu-item" onclick="pickAnnotation('±')">±</div>
+        <div class="context-menu-item" onclick="pickAnnotation('⩲')">⩲</div>
+        <div class="context-menu-item" onclick="pickAnnotation('⩱')">⩱</div>
         <div class="context-menu-item" onclick="pickAnnotation('−+')">−+</div>
         <div class="context-menu-item" onclick="pickAnnotation('+−')">+−</div>
         <div class="context-menu-item" onclick="pickAnnotation('=')">=

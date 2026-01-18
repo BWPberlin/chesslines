@@ -71,7 +71,7 @@ function playSound(type) {
     else if (type === 'error') { osc.type = 'sine'; osc.frequency.setValueAtTime(150, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.2); gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime); gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2); osc.start(); osc.stop(audioCtx.currentTime + 0.2); }
 }
 
-let userSettings = JSON.parse(localStorage.getItem('chessSettingsPro')) || { theme: 'dark', sound: true, coords: true, highlight: true, autoRepeat: false, animSpeed: 200, boardColor: 'green', pieceStyle: 'wikipedia', sortMode: 'similarity', treeView: false, editorOrder: ['name', 'stockfish', 'database', 'moves', 'notes'], analysisOpen: false, databaseOpen: true };
+let userSettings = JSON.parse(localStorage.getItem('chessSettingsPro')) || { theme: 'dark', sound: true, coords: true, highlight: true, autoRepeat: false, animSpeed: 200, boardColor: 'green', pieceStyle: 'wikipedia', sortMode: 'similarity', treeView: false, editorOrder: ['name', 'stockfish', 'database', 'moves'], analysisOpen: false, databaseOpen: true, roundedCorners: false };
 
 // Line statistics tracking
 let lineStats = JSON.parse(localStorage.getItem('chessLineStats')) || {};
@@ -79,15 +79,20 @@ let lineStats = JSON.parse(localStorage.getItem('chessLineStats')) || {};
 // Safety Reset for old bad settings
 if(userSettings.pieceStyle === 'dubrovnik') { userSettings.pieceStyle = 'wikipedia'; localStorage.setItem('chessSettingsPro', JSON.stringify(userSettings)); }
 // Migration: Convert old createModeOrder to new editorOrder array
-const defaultOrder = ['name', 'stockfish', 'database', 'moves', 'notes'];
+const defaultOrder = ['name', 'stockfish', 'database', 'moves'];
 if(!userSettings.editorOrder || !Array.isArray(userSettings.editorOrder)) {
     // Convert old format to new
     if(userSettings.createModeOrder === 'database-first') {
-        userSettings.editorOrder = ['name', 'database', 'stockfish', 'moves', 'notes'];
+        userSettings.editorOrder = ['name', 'database', 'stockfish', 'moves'];
     } else {
         userSettings.editorOrder = defaultOrder;
     }
     delete userSettings.createModeOrder;
+    localStorage.setItem('chessSettingsPro', JSON.stringify(userSettings));
+}
+// Migration: Remove 'notes' from editorOrder if present
+if(userSettings.editorOrder && userSettings.editorOrder.includes('notes')) {
+    userSettings.editorOrder = userSettings.editorOrder.filter(k => k !== 'notes');
     localStorage.setItem('chessSettingsPro', JSON.stringify(userSettings));
 }
 
@@ -109,6 +114,7 @@ function updateSettingsUI() {
     document.getElementById('setting-highlight-row').classList.toggle('active', userSettings.highlight);
     document.getElementById('setting-autorepeat-row').classList.toggle('active', userSettings.autoRepeat);
     document.getElementById('setting-treeview-row').classList.toggle('active', userSettings.treeView); //Tree
+    document.getElementById('setting-rounded-row').classList.toggle('active', userSettings.roundedCorners);
     
     // Stockfish Toggle
     const engineRow = document.getElementById('setting-engine-row');
@@ -129,6 +135,7 @@ function updateSettingsUI() {
 function applySettings() {
     if (userSettings.theme === 'light') document.body.classList.add('light-mode'); else document.body.classList.remove('light-mode');
     document.getElementById('board').className = `board-theme-${userSettings.boardColor}`;
+    if (userSettings.roundedCorners) document.getElementById('board').classList.add('board-rounded'); else document.getElementById('board').classList.remove('board-rounded');
     if(board) initBoard();
     updateSettingsUI();
 }
@@ -178,8 +185,7 @@ function renderEditorOrderList() {
         'name': 'Kategorie',
         'stockfish': 'Stockfish Analyse',
         'database': 'Datenbank',
-        'moves': 'Züge',
-        'notes': 'Notizen'
+        'moves': 'Züge'
     };
     
     container.innerHTML = userSettings.editorOrder.map(key => `
@@ -261,6 +267,47 @@ function pieceThemeUrl(piece) {
 }
 
 // --- DRAG HANDLER (GEFIXT + LOCK) ---
+let dragSourceSquare = null;
+let lastHoverSquare = null;
+
+function getSquareFromPoint(x, y) {
+    const boardEl = document.getElementById('board');
+    if (!boardEl) return null;
+    const rect = boardEl.getBoundingClientRect();
+    const squareSize = rect.width / 8;
+    const relX = x - rect.left;
+    const relY = y - rect.top;
+    if (relX < 0 || relX >= rect.width || relY < 0 || relY >= rect.height) return null;
+    let col = Math.floor(relX / squareSize);
+    let row = Math.floor(relY / squareSize);
+    // Adjust for board orientation
+    const isFlipped = currentSide === 'black';
+    if (isFlipped) {
+        col = 7 - col;
+        row = 7 - row;
+    }
+    const files = 'abcdefgh';
+    const ranks = '87654321';
+    return files[col] + ranks[row];
+}
+
+function onDragMove(e) {
+    if (!dragSourceSquare) return;
+    const x = e.clientX || (e.touches && e.touches[0] && e.touches[0].clientX);
+    const y = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY);
+    if (x === undefined || y === undefined) return;
+    const square = getSquareFromPoint(x, y);
+    if (square !== lastHoverSquare) {
+        if (lastHoverSquare) {
+            $(`#board .square-${lastHoverSquare}`).removeClass('drag-hover');
+        }
+        if (square && square !== dragSourceSquare) {
+            $(`#board .square-${square}`).addClass('drag-hover');
+        }
+        lastHoverSquare = square;
+    }
+}
+
 function onDragStart (source, piece) { 
     // Generelle Checks
     if (isPaused) return false; 
@@ -281,6 +328,16 @@ function onDragStart (source, piece) {
         }
     }
     
+    // Highlight the source square and mark board as dragging
+    dragSourceSquare = source;
+    lastHoverSquare = null;
+    $('#board').addClass('is-dragging');
+    $(`#board .square-${source}`).addClass('drag-source');
+    
+    // Add mouse/touch move listeners for hover tracking
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('touchmove', onDragMove);
+    
     setTimeout(() => {
         const draggedPieces = document.querySelectorAll('img[src*="piece"]');
         draggedPieces.forEach(el => {
@@ -293,13 +350,26 @@ function onDragStart (source, piece) {
     return true; 
 }
 
+function onMouseoverSquare(square, piece) {
+    // Only highlight if we're dragging a piece
+    if (dragSourceSquare) {
+        $(`#board .square-${square}`).addClass('drag-hover');
+    }
+}
+
+function onMouseoutSquare(square, piece) {
+    $(`#board .square-${square}`).removeClass('drag-hover');
+}
+
 function initBoard() {
     const config = { 
         draggable: true, 
         position: game.fen(), 
         onDragStart: onDragStart, 
         onDrop: onDrop, 
-        onSnapEnd: onSnapEnd, 
+        onSnapEnd: onSnapEnd,
+        onMouseoverSquare: onMouseoverSquare,
+        onMouseoutSquare: onMouseoutSquare,
         pieceTheme: pieceThemeUrl,
         moveSpeed: userSettings.animSpeed, 
         snapSpeed: userSettings.animSpeed, 
@@ -329,6 +399,14 @@ let addModeFullHistory = []; // Store full history to enable forward navigation 
 function getCleanFen() { return game.fen().split(' ').slice(0, 4).join(' '); }
 
 function onDrop (source, target) {
+    // Clear drag highlights and remove listeners
+    $('#board').removeClass('is-dragging');
+    $('#board .square-55d63').removeClass('drag-source drag-hover');
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('touchmove', onDragMove);
+    dragSourceSquare = null;
+    lastHoverSquare = null;
+    
     let moveObj = { from: source, to: target, promotion: 'q' }; 
     let move = game.move(moveObj);
     if (move === null) return 'snapback';
@@ -399,6 +477,30 @@ function resetBoardSearch() {
     currentTrainingAnnotations = {}; // Clear training annotations
     currentDisplayAnnotations = {}; // Clear display annotations
     drawShapes();
+}
+
+// Toggle eval bar on home screen
+let evalBarActive = false;
+
+async function toggleEvalBar() {
+    evalBarActive = !evalBarActive;
+    const btn = document.getElementById('btn-eval-bar');
+    const evalBar = document.getElementById('eval-bar-container');
+    
+    if (evalBarActive) {
+        btn.classList.add('active');
+        evalBar.classList.remove('hidden');
+        isEngineRunning = true;
+        startEvaluation();
+    } else {
+        btn.classList.remove('active');
+        evalBar.classList.add('hidden');
+        isEngineRunning = false;
+        await stopEngineCalculation();
+        // Reset eval bar
+        document.getElementById('eval-fill').style.height = '50%';
+        document.getElementById('eval-score').innerText = '0.0';
+    }
 }
 
 function getGroupedLines(side, filterPgn = null) { const groups = {}; repertoire[side].forEach(line => { if (filterPgn && !line.pgn.startsWith(filterPgn)) return; const cat = line.category || 'Allgemein'; if (!groups[cat]) groups[cat] = []; groups[cat].push(line); }); return groups; }
@@ -558,7 +660,7 @@ function renderList(filterPgn = null) {
                 const movesHtml = renderLineMovesWithContextMenu(line);
                 
                 div.innerHTML = `
-                    <span class="line-moves" onclick="loadLinePreview(${line.id})">${movesHtml}</span>
+                    <span class="line-moves">${movesHtml}</span>
                     <div class="line-actions">
                         <button onclick="toggleRepetitionFromList(${line.id})" class="toggle-rep" title="Wiederholung">
                             <i class="${isInRepetition ? 'fas' : 'far'} fa-bookmark" style="${isInRepetition ? 'color:var(--warning)' : ''}"></i>
@@ -596,8 +698,9 @@ function renderLineMovesWithContextMenu(line) {
         
         // Check if this move has an annotation
         const annotation = line.annotations && line.annotations[i] ? line.annotations[i] : '';
+        const annotationHtml = annotation ? `<span style="color: var(--primary); font-weight: bold; margin-left: 2px;">${annotation}</span>` : '';
         
-        html += `<span class="view-move" data-line-id="${line.id}" data-move-index="${i}" oncontextmenu="showViewContextMenu(event, ${line.id}, ${i})">${history[i]}${annotation}</span> `;
+        html += `<span class="view-move" data-line-id="${line.id}" data-move-index="${i}" onclick="event.stopPropagation(); showPositionFromLine(${line.id}, ${i})" oncontextmenu="showViewContextMenu(event, ${line.id}, ${i})">${history[i]}</span>${annotationHtml} `;
     }
     
     return html;
@@ -633,6 +736,14 @@ function buildCategoryTree(lines, repetitionSet) {
     const root = { children: {} };
     let moveIdCounter = 0; // Unique ID for each move span
 
+    // Build a map of lineId -> annotations for quick lookup
+    const lineAnnotationsMap = {};
+    lines.forEach(line => {
+        if (line.annotations) {
+            lineAnnotationsMap[line.id] = line.annotations;
+        }
+    });
+
     lines.forEach(line => {
         // Use chess.js to get clean moves array
         const tempGame = new Chess();
@@ -647,8 +758,13 @@ function buildCategoryTree(lines, repetitionSet) {
                     move: moveSan, 
                     children: {}, 
                     lineIds: [], // Stores IDs that end exactly here
-                    ply: index + 1 // Move number logic (1=White, 2=Black)
+                    ply: index + 1, // Move number logic (1=White, 2=Black)
+                    annotations: {} // Store annotations by lineId
                 };
+            }
+            // Store annotation for this move from this line
+            if (line.annotations && line.annotations[index]) {
+                currentNode.children[moveSan].annotations[line.id] = line.annotations[index];
             }
             currentNode = currentNode.children[moveSan];
         });
@@ -679,8 +795,13 @@ function buildCategoryTree(lines, repetitionSet) {
         const pathAttr = currentPath.join(',');
         const escapedPath = pathAttr.replace(/'/g, "\\'");
 
+        // Get annotation for this move (use first annotation found if multiple lines have different annotations)
+        const annotationValues = Object.values(node.annotations || {});
+        const annotation = annotationValues.length > 0 ? annotationValues[0] : '';
+        const annotationHtml = annotation ? `<span style="color: var(--primary); font-weight: bold; margin-left: 2px;">${annotation}</span>` : '';
+
         // Render the Move with path data and context menu support
-        html += `<span class="tree-move" id="${moveId}" data-path="${pathAttr}" onclick="previewTreeMove('${node.move}', ${node.ply})" oncontextmenu="showTreeMoveContextMenu(event, '${escapedPath}')">${moveLabel}</span>`;
+        html += `<span class="tree-move" id="${moveId}" data-path="${pathAttr}" onclick="showPositionFromTreePath('${escapedPath}')" oncontextmenu="showTreeMoveContextMenu(event, '${escapedPath}')">${moveLabel}</span>${annotationHtml}`;
 
         // Render Line Markers (Folder icons for actions)
         if (hasLineEnd) {
@@ -803,13 +924,66 @@ function clearTreeHighlight() {
     });
 }
 
-// Helper to preview board position when clicking a text move in the tree
-// (Note: precise reconstruction from just a move name in a merged tree is hard without context, 
-// strictly this is visual only, but we could make it play the move if we tracked FENs. 
-// For now, it's a visual aid.)
-function previewTreeMove(move, ply) {
-    // Optional: You could make this highlight the board if a line is currently loaded
-    // For now, it's just a clickable text.
+// Show position from tree path (comma-separated moves)
+function showPositionFromTreePath(path) {
+    const moves = path.split(',');
+    game.reset();
+    let lastMove = null;
+    for (const moveSan of moves) {
+        lastMove = game.move(moveSan);
+    }
+    board.position(game.fen());
+    if (lastMove) highlightLastMove(lastMove);
+    updateViewSearch();
+    if (isEngineRunning) startEvaluation();
+}
+
+// Show position from a stored line at specific move index
+function showPositionFromLine(lineId, moveIndex) {
+    const line = repertoire[currentSide].find(l => l.id === lineId);
+    if (!line) return;
+    
+    const tempGame = new Chess();
+    tempGame.load_pgn(line.pgn);
+    const history = tempGame.history({ verbose: true });
+    
+    game.reset();
+    let lastMove = null;
+    for (let i = 0; i <= moveIndex && i < history.length; i++) {
+        lastMove = game.move(history[i]);
+    }
+    board.position(game.fen());
+    if (lastMove) highlightLastMove(lastMove);
+    updateViewSearch();
+    if (isEngineRunning) startEvaluation();
+}
+
+// Show position from import line at specific move index
+function showPositionFromImportLine(lineIndex, moveIndex) {
+    const pgn = parsedImportLines[lineIndex];
+    if (!pgn) return;
+    
+    const tempGame = new Chess();
+    try {
+        tempGame.load_pgn(pgn);
+    } catch (e) {
+        return;
+    }
+    const history = tempGame.history({ verbose: true });
+    
+    game.reset();
+    let lastMove = null;
+    for (let i = 0; i <= moveIndex && i < history.length; i++) {
+        lastMove = game.move(history[i]);
+    }
+    board.position(game.fen());
+    if (lastMove) highlightLastMove(lastMove);
+    
+    // Show filter banner and filter import lines
+    document.getElementById('import-filter-banner').classList.remove('hidden');
+    renderImportLinesList(game.pgn());
+    
+    if (isEngineRunning) startEvaluation();
 }
 
 function renameCategory(oldName) { const newName = prompt("Neuer Name:", oldName); if (newName && newName.trim() !== "" && newName !== oldName) { repertoire[currentSide].forEach(line => { if (line.category === oldName) line.category = newName.trim(); }); saveData(); renderList(game.pgn()); } }
@@ -845,27 +1019,28 @@ function prepareEditor(title, pgn, category, commentsData, shapesData, annotatio
     currentDisplayAnnotations = {}; // Reset display annotations
     
     // Restore analysis and database panel states from settings
-    const btns = document.querySelectorAll('.analyze-btn');
+    const btnAnalysis = document.getElementById('btn-analysis');
+    const btnDatabase = document.getElementById('btn-database');
     
     // Restore Stockfish analysis state
     analysisActive = userSettings.analysisOpen || false;
     if (analysisActive) {
         document.getElementById('analysis-section').classList.remove('hidden');
-        if (btns[0]) btns[0].classList.add('active');
+        if (btnAnalysis) btnAnalysis.classList.add('active');
         runStockfishAnalysis();
     } else {
         document.getElementById('analysis-section').classList.add('hidden');
-        if (btns[0]) btns[0].classList.remove('active');
+        if (btnAnalysis) btnAnalysis.classList.remove('active');
     }
     
     // Restore database state
     databaseActive = userSettings.databaseOpen !== undefined ? userSettings.databaseOpen : true;
     if (databaseActive) {
         document.getElementById('explorer-section').classList.remove('hidden');
-        if (btns[1]) btns[1].classList.add('active');
+        if (btnDatabase) btnDatabase.classList.add('active');
     } else {
         document.getElementById('explorer-section').classList.add('hidden');
-        if (btns[1]) btns[1].classList.remove('active');
+        if (btnDatabase) btnDatabase.classList.remove('active');
     }
     
     const datalist = document.getElementById('category-datalist'); datalist.innerHTML = ''; Object.keys(getGroupedLines(currentSide)).forEach(cat => { const opt = document.createElement('option'); opt.value = cat; datalist.appendChild(opt); }); game.reset(); if (pgn) game.load_pgn(pgn); board.position(game.fen()); board.orientation(currentSide); const history = game.history({verbose:true}); 
@@ -1320,7 +1495,8 @@ function updateProgress() {
         if (!expected || (move.from === expected.from && move.to === expected.to)) { 
             // Clear previous annotations and add only the current one
             currentTrainingAnnotations = {};
-            if (currentTrainLine.annotations && currentTrainLine.annotations[currentMoveIndex]) {
+            const hasAnnotation = currentTrainLine.annotations && currentTrainLine.annotations[currentMoveIndex];
+            if (hasAnnotation) {
                 currentTrainingAnnotations[expected.to] = currentTrainLine.annotations[currentMoveIndex];
             }
             currentMoveIndex++; 
@@ -1330,7 +1506,9 @@ function updateProgress() {
                         successLine(); 
                     } 
                     else { 
-                        setTimeout(playBotMove, 400); 
+                        // Add extra delay if user's move had an annotation
+                        const delay = hasAnnotation ? 1200 : 400;
+                        setTimeout(playBotMove, delay); 
                     }
                 });
             }, 100);
@@ -1433,18 +1611,449 @@ function switchUI(id) {
 }
 function saveData() { localStorage.setItem('chessRepertoire_v3', JSON.stringify(repertoire)); }
 
+// --- PGN IMPORT WITH VARIATIONS ---
+let parsedImportLines = [];
+let importLineAnnotations = {}; // Track annotations for import lines: { lineIndex: { moveIndex: 'annotation' } }
+
+function openImportPgn() {
+    mode = 'import';
+    switchUI('import-pgn-mode');
+    // Clear previous data
+    document.getElementById('import-category-input').value = '';
+    document.getElementById('import-pgn-input').value = '';
+    document.getElementById('import-preview').classList.add('hidden');
+    document.getElementById('import-execute-btn').disabled = true;
+    parsedImportLines = [];
+    importLineAnnotations = {};
+    
+    // Set up live parsing on input
+    document.getElementById('import-pgn-input').oninput = debounce(parseImportPgn, 300);
+}
+
+function cancelImportPgn() {
+    mode = 'view';
+    parsedImportLines = [];
+    importLineAnnotations = {};
+    
+    // Reset board to starting position
+    game.reset();
+    board.position(game.fen());
+    $('#board .square-55d63').removeClass('highlight-square');
+    
+    // Hide filter banner
+    document.getElementById('import-filter-banner').classList.add('hidden');
+    
+    switchUI('view-mode');
+}
+
+// Reset import filter and show all lines
+function resetImportFilter() {
+    game.reset();
+    board.position(game.fen());
+    $('#board .square-55d63').removeClass('highlight-square');
+    document.getElementById('import-filter-banner').classList.add('hidden');
+    renderImportLinesList();
+}
+
+// Debounce helper for live parsing
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Parse PGN with variations and extract all lines
+function parseImportPgn() {
+    const pgnInput = document.getElementById('import-pgn-input').value.trim();
+    const preview = document.getElementById('import-preview');
+    const linesList = document.getElementById('import-lines-list');
+    const countEl = document.getElementById('import-lines-count');
+    const executeBtn = document.getElementById('import-execute-btn');
+    
+    if (!pgnInput) {
+        preview.classList.add('hidden');
+        executeBtn.disabled = true;
+        parsedImportLines = [];
+        return;
+    }
+    
+    // Extract all lines from PGN with variations
+    parsedImportLines = extractLinesFromPgn(pgnInput);
+    
+    if (parsedImportLines.length === 0) {
+        preview.classList.add('hidden');
+        executeBtn.disabled = true;
+        return;
+    }
+    
+    // Show preview
+    preview.classList.remove('hidden');
+    executeBtn.disabled = false;
+    
+    // Render preview list
+    renderImportLinesList();
+}
+
+function renderImportLinesList(filterPgn = null) {
+    const linesList = document.getElementById('import-lines-list');
+    linesList.innerHTML = '';
+    
+    // Get filter moves if filtering
+    let filterMoves = [];
+    if (filterPgn) {
+        const filterGame = new Chess();
+        filterGame.load_pgn(filterPgn);
+        filterMoves = filterGame.history();
+    }
+    
+    parsedImportLines.forEach((line, lineIndex) => {
+        // If filtering, check if line starts with filter moves
+        if (filterPgn) {
+            const tempGame = new Chess();
+            try {
+                tempGame.load_pgn(line);
+            } catch (e) {
+                return; // Skip invalid lines
+            }
+            const lineMoves = tempGame.history();
+            
+            // Check if line starts with filter moves
+            let matches = true;
+            for (let i = 0; i < filterMoves.length; i++) {
+                if (lineMoves[i] !== filterMoves[i]) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (!matches) return; // Skip non-matching lines
+        }
+        
+        const div = document.createElement('div');
+        div.className = 'line-item import-line-item';
+        div.dataset.index = lineIndex;
+        
+        // Format moves like home page with context menu support
+        const movesHtml = formatImportLineMoves(line, lineIndex);
+        
+        div.innerHTML = `
+            <span class="line-moves" id="import-line-pgn-${lineIndex}">${movesHtml}</span>
+            <div class="line-actions">
+                <button onclick="editImportLine(${lineIndex})" title="Bearbeiten"><i class="fas fa-pen"></i></button>
+                <button class="del" onclick="deleteImportLine(${lineIndex})" title="Löschen"><i class="fas fa-trash"></i></button>
+            </div>
+        `;
+        linesList.appendChild(div);
+    });
+}
+
+function formatImportLineMoves(pgn, lineIndex) {
+    if (!pgn || pgn.trim() === '') return '<span class="view-move">Startposition</span>';
+    
+    const tempGame = new Chess();
+    try {
+        tempGame.load_pgn(pgn);
+    } catch (e) {
+        return pgn; // Return raw if can't parse
+    }
+    
+    const history = tempGame.history();
+    if (history.length === 0) return '<span class="view-move">Startposition</span>';
+    
+    // Get annotations for this line
+    const lineAnnotations = importLineAnnotations[lineIndex] || {};
+    
+    let html = '';
+    let moveNumber = 1;
+    
+    for (let i = 0; i < history.length; i++) {
+        if (i % 2 === 0) {
+            html += `<span class="view-move-num">${moveNumber}.</span>`;
+        }
+        const annotation = lineAnnotations[i] || '';
+        const annotationHtml = annotation ? `<span style="color: var(--primary); font-weight: bold; margin-left: 2px;">${annotation}</span>` : '';
+        html += `<span class="view-move" onclick="showPositionFromImportLine(${lineIndex}, ${i})" oncontextmenu="showImportContextMenu(event, ${lineIndex}, ${i})">${history[i]}</span>${annotationHtml} `;
+        if (i % 2 === 1) moveNumber++;
+    }
+    
+    return html.trim();
+}
+
+function editImportLine(index) {
+    const pgnSpan = document.getElementById(`import-line-pgn-${index}`);
+    const currentPgn = parsedImportLines[index];
+    
+    // Replace span with input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'import-line-edit-input';
+    input.value = currentPgn;
+    input.dataset.index = index;
+    
+    // Handle save on enter or blur
+    input.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+            saveImportLineEdit(index, input.value);
+        } else if (e.key === 'Escape') {
+            renderImportLinesList(); // Cancel edit
+        }
+    };
+    input.onblur = () => {
+        saveImportLineEdit(index, input.value);
+    };
+    
+    pgnSpan.replaceWith(input);
+    input.focus();
+    input.select();
+}
+
+function saveImportLineEdit(index, newPgn) {
+    // Validate the PGN using chess.js
+    const tempGame = new Chess();
+    try {
+        if (tempGame.load_pgn(newPgn)) {
+            parsedImportLines[index] = tempGame.pgn();
+        } else if (newPgn.trim() === '') {
+            // Empty = will be filtered out on import
+            parsedImportLines[index] = '';
+        } else {
+            // Try to validate moves manually
+            const validated = validateAndFormatPgn(newPgn);
+            parsedImportLines[index] = validated || newPgn;
+        }
+    } catch (e) {
+        parsedImportLines[index] = newPgn;
+    }
+    
+    renderImportLinesList();
+}
+
+function validateAndFormatPgn(pgn) {
+    const tempGame = new Chess();
+    // Try to parse moves from the string
+    const moves = pgn.replace(/\d+\.\s*/g, '').trim().split(/\s+/);
+    for (const move of moves) {
+        if (!move) continue;
+        try {
+            const result = tempGame.move(move);
+            if (!result) return null;
+        } catch (e) {
+            return null;
+        }
+    }
+    return tempGame.pgn();
+}
+
+function deleteImportLine(index) {
+    parsedImportLines.splice(index, 1);
+    
+    // Re-index annotations: shift all indices after the deleted one
+    const newAnnotations = {};
+    for (const lineIdx in importLineAnnotations) {
+        const idx = parseInt(lineIdx);
+        if (idx < index) {
+            newAnnotations[idx] = importLineAnnotations[idx];
+        } else if (idx > index) {
+            newAnnotations[idx - 1] = importLineAnnotations[idx];
+        }
+        // idx === index is skipped (deleted)
+    }
+    importLineAnnotations = newAnnotations;
+    
+    renderImportLinesList();
+    
+    // Disable import button if no lines left
+    if (parsedImportLines.length === 0) {
+        document.getElementById('import-execute-btn').disabled = true;
+        document.getElementById('import-preview').classList.add('hidden');
+    }
+}
+
+// Core parser: extract all main lines from PGN with variations
+function extractLinesFromPgn(pgn) {
+    // Clean up PGN: remove headers, comments, result markers
+    let cleaned = pgn
+        .replace(/\[.*?\]/g, '')           // Remove headers [Event "..."]
+        .replace(/\{[^}]*\}/g, '')         // Remove comments {comment}
+        .replace(/\$\d+/g, '')             // Remove NAG annotations $1, $2, etc.
+        .replace(/\s*1-0\s*$/, '')         // Remove result 1-0
+        .replace(/\s*0-1\s*$/, '')         // Remove result 0-1
+        .replace(/\s*1\/2-1\/2\s*$/, '')   // Remove result 1/2-1/2
+        .replace(/\s*\*\s*$/, '')          // Remove unfinished marker *
+        .replace(/\?\!|\!\?|\?\?|\!\!|\?|\!/g, '') // Remove move annotations
+        .replace(/\s+/g, ' ')              // Normalize whitespace
+        .trim();
+    
+    if (!cleaned) return [];
+    
+    // Parse the moves recursively, handling variations
+    const lines = [];
+    parseVariations(cleaned, [], lines);
+    
+    // Convert move arrays to PGN strings
+    return lines.map(movesToPgn).filter(pgn => pgn.length > 0);
+}
+
+// Recursively parse variations and collect all lines
+function parseVariations(text, currentMoves, allLines) {
+    let pos = 0;
+    let moves = [...currentMoves];
+    
+    while (pos < text.length) {
+        // Skip whitespace
+        while (pos < text.length && /\s/.test(text[pos])) pos++;
+        if (pos >= text.length) break;
+        
+        // Check for variation start
+        if (text[pos] === '(') {
+            // Find matching closing parenthesis
+            let depth = 1;
+            let varStart = pos + 1;
+            pos++;
+            while (pos < text.length && depth > 0) {
+                if (text[pos] === '(') depth++;
+                else if (text[pos] === ')') depth--;
+                pos++;
+            }
+            let varEnd = pos - 1;
+            let varText = text.substring(varStart, varEnd);
+            
+            // Parse variation from the parent position (before last move)
+            let parentMoves = moves.slice(0, -1);
+            parseVariations(varText, parentMoves, allLines);
+            continue;
+        }
+        
+        // Check for variation end (shouldn't happen at top level)
+        if (text[pos] === ')') {
+            pos++;
+            continue;
+        }
+        
+        // Parse move number (e.g., "1.", "1...", "12.")
+        let moveNumMatch = text.substring(pos).match(/^(\d+\.+\s*)/);
+        if (moveNumMatch) {
+            pos += moveNumMatch[0].length;
+            continue;
+        }
+        
+        // Parse move (e.g., "e4", "Nf3", "O-O", "exd5", "Qxf7+")
+        let moveMatch = text.substring(pos).match(/^([KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?|O-O-O|O-O)/);
+        if (moveMatch) {
+            moves.push(moveMatch[1]);
+            pos += moveMatch[0].length;
+            continue;
+        }
+        
+        // Skip any unrecognized character
+        pos++;
+    }
+    
+    // Add this line if it has moves
+    if (moves.length > 0) {
+        allLines.push([...moves]);
+    }
+}
+
+// Convert array of moves to PGN string
+function movesToPgn(moves) {
+    // Use chess.js to validate and format moves
+    const tempGame = new Chess();
+    let validMoves = [];
+    
+    for (let move of moves) {
+        try {
+            const result = tempGame.move(move);
+            if (result) {
+                validMoves.push(result.san);
+            } else {
+                break; // Stop at first invalid move
+            }
+        } catch (e) {
+            break;
+        }
+    }
+    
+    return tempGame.pgn();
+}
+
+// Execute the import: add all parsed lines to repertoire
+function executeImportPgn() {
+    const category = document.getElementById('import-category-input').value.trim() || 'Importiert';
+    
+    if (parsedImportLines.length === 0) {
+        alert('Keine gültigen Linien gefunden.');
+        return;
+    }
+    
+    let addedCount = 0;
+    let skippedCount = 0;
+    
+    for (let i = 0; i < parsedImportLines.length; i++) {
+        const pgn = parsedImportLines[i];
+        
+        // Check if this line already exists
+        const exists = repertoire[currentSide].some(l => l.pgn === pgn);
+        if (exists) {
+            skippedCount++;
+            continue;
+        }
+        
+        // Create line data
+        const tempGame = new Chess();
+        tempGame.load_pgn(pgn);
+        const moves = tempGame.history({ verbose: true });
+        
+        // Get annotations for this line
+        const lineAnnotations = importLineAnnotations[i] || {};
+        
+        const lineData = {
+            id: Date.now() + addedCount, // Ensure unique IDs
+            pgn: pgn,
+            category: category,
+            moves: moves,
+            comments: {},
+            shapes: {},
+            annotations: { ...lineAnnotations }
+        };
+        
+        repertoire[currentSide].push(lineData);
+        addedCount++;
+    }
+    
+    saveData();
+    
+    // Show result message
+    let message = `${addedCount} Linie${addedCount !== 1 ? 'n' : ''} importiert`;
+    if (skippedCount > 0) {
+        message += ` (${skippedCount} bereits vorhanden)`;
+    }
+    alert(message);
+    
+    // Return to view mode and refresh
+    cancelImportPgn();
+    renderList();
+}
+
 function loadNoteForCurrentPos() {
     const fen = getCleanFen();
     const noteEl = document.getElementById('move-note-input');
     if(noteEl) noteEl.value = currentComments[fen] || "";
     drawShapes();
 }
-document.getElementById('move-note-input').addEventListener('input', function() {
-    const fen = getCleanFen();
-    if(this.value.trim() === "") delete currentComments[fen];
-    else currentComments[fen] = this.value;
+const noteInputEl = document.getElementById('move-note-input');
+if (noteInputEl) {
+    noteInputEl.addEventListener('input', function() {
+        const fen = getCleanFen();
+        if(this.value.trim() === "") delete currentComments[fen];
+        else currentComments[fen] = this.value;
+    });
 }
-);
 
 // --- ARROW DRAWING LOGIC ---
 const boardWrapper = document.getElementById('board-wrapper');
@@ -1762,11 +2371,13 @@ window.addEventListener('resize', () => {
 let contextMenuTargetIndex = null;
 let viewModeEditLineId = null; // Track which line is being edited in view mode
 let treeMoveContextPath = null; // Track path for tree move context menu
+let importModeLineIndex = null; // Track which import line is being edited
 
 function showContextMenu(x, y, index) {
     contextMenuTargetIndex = index;
     viewModeEditLineId = null; // Reset view mode editing
     treeMoveContextPath = null; // Reset tree path
+    importModeLineIndex = null; // Reset import mode
     const menu = document.getElementById('move-context-menu');
     // Reset submenu visibility each time
     const submenu = document.getElementById('annotation-submenu');
@@ -1819,6 +2430,7 @@ function showViewContextMenu(e, lineId, moveIndex) {
     contextMenuTargetIndex = moveIndex;
     viewModeEditLineId = lineId;
     treeMoveContextPath = null; // Reset tree path
+    importModeLineIndex = null; // Reset import mode
     
     const menu = document.getElementById('move-context-menu');
     const submenu = document.getElementById('annotation-submenu');
@@ -1861,12 +2473,64 @@ function showViewContextMenu(e, lineId, moveIndex) {
     menu.style.top = finalY + 'px';
 }
 
+// Show context menu for import mode moves
+function showImportContextMenu(e, lineIndex, moveIndex) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    contextMenuTargetIndex = moveIndex;
+    viewModeEditLineId = null; // Reset view mode
+    treeMoveContextPath = null; // Reset tree path
+    importModeLineIndex = lineIndex; // Track import line
+    
+    const menu = document.getElementById('move-context-menu');
+    const submenu = document.getElementById('annotation-submenu');
+    if (submenu) submenu.classList.add('hidden');
+    
+    // Show view position option in import mode
+    const viewPosItem = document.getElementById('ctx-view-position');
+    if (viewPosItem) viewPosItem.classList.remove('hidden');
+    
+    // Show delete option in import mode
+    const deleteItem = document.getElementById('ctx-delete-move');
+    if (deleteItem) deleteItem.classList.remove('hidden');
+    
+    // Show annotation option in import mode
+    const addItem = document.getElementById('ctx-add-annotation');
+    if (addItem) addItem.classList.remove('hidden');
+    
+    // Position menu
+    menu.style.left = '0px';
+    menu.style.top = '0px';
+    menu.classList.remove('hidden');
+    
+    const menuRect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    let finalX = e.clientX;
+    let finalY = e.clientY;
+    
+    if (e.clientX + menuRect.width > viewportWidth) {
+        finalX = viewportWidth - menuRect.width - 10;
+    }
+    if (e.clientY + menuRect.height > viewportHeight) {
+        finalY = viewportHeight - menuRect.height - 10;
+    }
+    if (finalX < 10) finalX = 10;
+    if (finalY < 10) finalY = 10;
+    
+    menu.style.left = finalX + 'px';
+    menu.style.top = finalY + 'px';
+}
+
 // Show context menu for tree view moves
 function showTreeMoveContextMenu(e, path) {
     e.preventDefault();
     e.stopPropagation();
     
     treeMoveContextPath = path; // Store the path for viewing position
+    importModeLineIndex = null; // Reset import mode
     
     // Find the first line that matches this path for delete/annotation operations
     const pathMoves = path.split(',');
@@ -1921,7 +2585,10 @@ function showTreeMoveContextMenu(e, path) {
 
 function executeDeleteMove() {
     if (contextMenuTargetIndex !== null) {
-        if (viewModeEditLineId !== null) {
+        if (importModeLineIndex !== null) {
+            // Import mode: edit the import line
+            deleteMoveFromImportLine(importModeLineIndex, contextMenuTargetIndex);
+        } else if (viewModeEditLineId !== null) {
             // View mode: edit the stored line directly
             deleteMoveFromLine(viewModeEditLineId, contextMenuTargetIndex);
         } else {
@@ -1932,8 +2599,70 @@ function executeDeleteMove() {
     document.getElementById('move-context-menu').classList.add('hidden');
 }
 
+// Delete move from import line
+function deleteMoveFromImportLine(lineIndex, moveIndex) {
+    const pgn = parsedImportLines[lineIndex];
+    if (!pgn) return;
+    
+    const tempGame = new Chess();
+    try {
+        tempGame.load_pgn(pgn);
+    } catch (e) {
+        return;
+    }
+    
+    const history = tempGame.history();
+    
+    // Rebuild game up to the deleted move
+    tempGame.reset();
+    for (let i = 0; i < moveIndex; i++) {
+        tempGame.move(history[i]);
+    }
+    
+    // Update the import line
+    parsedImportLines[lineIndex] = tempGame.pgn();
+    
+    // Re-render
+    renderImportLinesList();
+}
+
 // View position after a specific move (view mode or tree mode)
 function executeViewPosition() {
+    // Handle import mode context menu
+    if (importModeLineIndex !== null && contextMenuTargetIndex !== null) {
+        const pgn = parsedImportLines[importModeLineIndex];
+        if (!pgn) {
+            document.getElementById('move-context-menu').classList.add('hidden');
+            return;
+        }
+        
+        const tempGame = new Chess();
+        tempGame.load_pgn(pgn);
+        const history = tempGame.history({ verbose: true });
+        
+        // Update the main board to show this position
+        game.reset();
+        for (let i = 0; i <= contextMenuTargetIndex && i < history.length; i++) {
+            game.move(history[i]);
+        }
+        board.position(game.fen());
+        
+        // Highlight the last move
+        if (history[contextMenuTargetIndex]) {
+            highlightLastMove(history[contextMenuTargetIndex]);
+        }
+        
+        // Show filter banner and filter import lines
+        document.getElementById('import-filter-banner').classList.remove('hidden');
+        renderImportLinesList(game.pgn());
+        
+        // Run engine evaluation if enabled
+        if (isEngineRunning) startEvaluation();
+        
+        document.getElementById('move-context-menu').classList.add('hidden');
+        return;
+    }
+    
     // Handle tree view context menu
     if (treeMoveContextPath !== null) {
         const moves = treeMoveContextPath.split(',');
@@ -2102,7 +2831,10 @@ function executeAddAnnotation() {
 function pickAnnotation(symbol) {
     if (contextMenuTargetIndex === null) return;
     
-    if (viewModeEditLineId !== null) {
+    if (importModeLineIndex !== null) {
+        // Import mode: add annotation to import line
+        annotateImportLineMove(importModeLineIndex, contextMenuTargetIndex, symbol);
+    } else if (viewModeEditLineId !== null) {
         // View mode: edit the stored line directly
         annotateLineMove(viewModeEditLineId, contextMenuTargetIndex, symbol);
     } else if (mode === 'add') {
@@ -2112,6 +2844,27 @@ function pickAnnotation(symbol) {
     
     const menu = document.getElementById('move-context-menu');
     if (menu) menu.classList.add('hidden');
+}
+
+// Add annotation to import line move
+function annotateImportLineMove(lineIndex, moveIndex, annotation) {
+    const pgn = parsedImportLines[lineIndex];
+    if (!pgn) return;
+    
+    // Initialize annotation storage for this line if needed
+    if (!importLineAnnotations[lineIndex]) {
+        importLineAnnotations[lineIndex] = {};
+    }
+    
+    // Toggle annotation if same one is clicked again
+    if (importLineAnnotations[lineIndex][moveIndex] === annotation) {
+        delete importLineAnnotations[lineIndex][moveIndex];
+    } else {
+        importLineAnnotations[lineIndex][moveIndex] = annotation;
+    }
+    
+    // Re-render
+    renderImportLinesList();
 }
 
 // Add annotation to a stored line (view mode)
@@ -2265,8 +3018,7 @@ let databaseActive = true; // Default to shown
 function toggleDatabaseMenu() {
     databaseActive = !databaseActive;
     const section = document.getElementById('explorer-section');
-    const btns = document.querySelectorAll('.analyze-btn');
-    const btn = btns[1]; // Second button is database
+    const btn = document.getElementById('btn-database');
     
     // Save state to settings
     userSettings.databaseOpen = databaseActive;
@@ -2282,11 +3034,10 @@ function toggleDatabaseMenu() {
     }
 }
 
-function toggleAnalysisMenu() {
+async function toggleAnalysisMenu() {
     analysisActive = !analysisActive;
     const section = document.getElementById('analysis-section');
-    const btns = document.querySelectorAll('.analyze-btn');
-    const btn = btns[0]; // First button is analysis
+    const btn = document.getElementById('btn-analysis');
     const evalBar = document.getElementById('eval-bar-container');
     
     // Save state to settings
@@ -2305,7 +3056,8 @@ function toggleAnalysisMenu() {
         if (!isEngineRunning) {
             evalBar.classList.add('hidden');
         }
-        sendEngineCommand('stop');
+        // Stop any ongoing calculation
+        await stopEngineCalculation();
         // Reset MultiPV to 1 for normal evaluation
         sendEngineCommand('setoption name MultiPV value 1');
     }
@@ -2344,8 +3096,10 @@ async function runStockfishAnalysis() {
     // Ensure engine is initialized
     await initEngine();
     
+    // Stop any ongoing calculation before starting new analysis
+    await stopEngineCalculation();
+    
     // Configure and start analysis with MultiPV
-    sendEngineCommand('stop');
     sendEngineCommand(`setoption name MultiPV value ${analysisLines}`);
     sendEngineCommand(`position fen ${fen}`);
     
@@ -2410,7 +3164,9 @@ function handleAnalysisMessage(line) {
         
         // Update display
         renderAnalysisMoves();
-        document.getElementById('analysis-depth').innerText = `Tiefe ${depth}`;
+        if (analysisActive) {
+            document.getElementById('analysis-depth').innerText = `Tiefe ${depth}`;
+        }
         
         // Update eval bar with best line (multipv 1)
         if (multipv === 1 && score !== null) {
@@ -2472,7 +3228,16 @@ function convertPvToSan(pvMoves, startFen) {
 }
 
 function renderAnalysisMoves() {
-    const container = document.getElementById('analysis-moves');
+    // Render to standard analysis section if active
+    if (analysisActive) {
+        renderAnalysisToContainer('analysis-moves', 'analysis-depth');
+    }
+}
+
+function renderAnalysisToContainer(containerId, depthSpanId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
     const turn = game.turn(); // 'w' or 'b'
     
     if (analysisResults.length === 0) {
@@ -2629,12 +3394,17 @@ function renderExplorerMoves(data) {
         moveDiv.className = 'explorer-move';
         moveDiv.onclick = () => playExplorerMove(moveData.san);
         
+        // Only show percentage text if segment is wide enough (>15%)
+        const whiteText = whitePercent >= 15 ? `${Math.round(whitePercent)}%` : '';
+        const drawText = drawPercent >= 15 ? `${Math.round(drawPercent)}%` : '';
+        const blackText = blackPercent >= 15 ? `${Math.round(blackPercent)}%` : '';
+        
         moveDiv.innerHTML = `
             <div class="explorer-move-san">${moveData.san}</div>
             <div class="explorer-move-bar">
-                <div class="explorer-bar-segment explorer-bar-white" style="width: ${whitePercent}%"></div>
-                <div class="explorer-bar-segment explorer-bar-draw" style="width: ${drawPercent}%"></div>
-                <div class="explorer-bar-segment explorer-bar-black" style="width: ${blackPercent}%"></div>
+                <div class="explorer-bar-segment explorer-bar-white" style="width: ${whitePercent}%">${whiteText}</div>
+                <div class="explorer-bar-segment explorer-bar-draw" style="width: ${drawPercent}%">${drawText}</div>
+                <div class="explorer-bar-segment explorer-bar-black" style="width: ${blackPercent}%">${blackText}</div>
             </div>
             <div class="explorer-move-stats">
                 <span class="explorer-move-games">${total.toLocaleString()}</span>

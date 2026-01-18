@@ -5,14 +5,18 @@
 let engine = null;
 let isEngineRunning = false;
 let engineInitialized = false;
+let engineCalculating = false; // Track if engine is currently calculating
 
 // --- BOT GAME VARIABLES ---
 let botGameActive = false;
 let botElo = 1500;
+let botStyle = 'neutral'; // neutral, greedy, tactical, positional
 let selectedBotLine = null;
 let isBotThinking = false;
 let botGameMoves = [];
 let botGameEvaluations = [];
+let botMultiPvMoves = []; // Store candidate moves for style selection
+let botWaitingForStyleMove = false; // Track if we're waiting for MultiPV results
 
 // Initialize Stockfish Web Worker
 async function initializeStockfish() {
@@ -54,8 +58,41 @@ function sendEngineCommand(command) {
         return;
     }
     
+    // Track when a 'go' command starts a calculation
+    if (command.startsWith('go ')) {
+        engineCalculating = true;
+    }
+    
     console.log('Sending command:', command);
     engine.postMessage(command);
+}
+
+// Stop any ongoing engine calculation
+// Returns a promise that resolves when the engine is ready for new commands
+function stopEngineCalculation() {
+    return new Promise((resolve) => {
+        if (!engine) {
+            resolve();
+            return;
+        }
+        
+        if (!engineCalculating) {
+            // No calculation in progress, resolve immediately
+            resolve();
+            return;
+        }
+        
+        // Send stop command
+        console.log('Stopping ongoing calculation...');
+        engine.postMessage('stop');
+        
+        // Give the engine a brief moment to process the stop command
+        // This ensures messages from the old search are flushed
+        setTimeout(() => {
+            engineCalculating = false;
+            resolve();
+        }, 50);
+    });
 }
 
 // Handle all messages from the engine
@@ -73,6 +110,11 @@ function handleEngineMessage(line) {
         return;
     }
     // --- FIX END ---
+
+    // Track when calculation stops (bestmove signals end of calculation)
+    if (line.startsWith('bestmove')) {
+        engineCalculating = false;
+    }
 
     // ANALYSIS MODE - handle MultiPV results
     if (analysisActive && line.startsWith('info') && line.includes(' pv ')) {
@@ -110,23 +152,61 @@ function handleEngineMessage(line) {
         }
     }
     
+    // BOT STYLE - Collect MultiPV candidates
+    if (mode === 'bot' && botWaitingForStyleMove && line.startsWith('info') && line.includes(' pv ')) {
+        const tokens = line.split(' ');
+        const multipvIdx = tokens.indexOf('multipv');
+        const pvIdx = tokens.indexOf('pv');
+        const scoreIdx = tokens.indexOf('score');
+        
+        if (multipvIdx !== -1 && pvIdx !== -1 && scoreIdx !== -1) {
+            const pvNum = parseInt(tokens[multipvIdx + 1]);
+            const move = tokens[pvIdx + 1];
+            const scoreType = tokens[scoreIdx + 1];
+            let scoreValue = parseInt(tokens[scoreIdx + 2]);
+            
+            if (scoreType === 'mate') {
+                scoreValue = scoreValue > 0 ? 10000 : -10000;
+            }
+            
+            // Store move with its info
+            botMultiPvMoves[pvNum - 1] = {
+                move: move,
+                score: scoreValue,
+                isCapture: isCaptureMove(move),
+                isCheck: isCheckMove(move)
+            };
+        }
+    }
+    
     // BOT MOVE LOGIC
     // Detects when the bot has finished thinking and plays the move
     if (mode === 'bot' && line.startsWith('bestmove')) {
-        const best = line.split(' ')[1];
-        if (best) {
+        let selectedMove;
+        
+        if (botWaitingForStyleMove && botMultiPvMoves.length > 0) {
+            // Select move based on style
+            selectedMove = selectMoveByStyle(botMultiPvMoves, line.split(' ')[1]);
+            botWaitingForStyleMove = false;
+            botMultiPvMoves = [];
+        } else {
+            selectedMove = line.split(' ')[1];
+        }
+        
+        if (selectedMove) {
             const moveResult = game.move({ 
-                from: best.substring(0, 2), 
-                to: best.substring(2, 4), 
-                promotion: 'q' 
+                from: selectedMove.substring(0, 2), 
+                to: selectedMove.substring(2, 4), 
+                promotion: selectedMove.length > 4 ? selectedMove[4] : 'q' 
             });
             
             if (moveResult) {
                 board.position(game.fen(), false);
                 
                 setTimeout(() => {
-                    playSound('move');
-                    highlightLastMove({ from: best.substring(0, 2), to: best.substring(2, 4) });
+                    if (moveResult.captured) playSound('capture');
+                    else playSound('move');
+                    highlightLastMove({ from: selectedMove.substring(0, 2), to: selectedMove.substring(2, 4) });
                     
                     setTimeout(() => {
                         isBotThinking = false;
@@ -144,6 +224,91 @@ function handleEngineMessage(line) {
     }
 }
 
+// Check if a UCI move is a capture (by checking if target square has a piece)
+function isCaptureMove(uciMove) {
+    const to = uciMove.substring(2, 4);
+    const piece = game.get(to);
+    return piece !== null;
+}
+
+// Check if a move gives check (simple heuristic)
+function isCheckMove(uciMove) {
+    // We can't easily check without making the move, so we return false
+    // The engine's evaluation already considers this
+    return false;
+}
+
+// Select move based on bot style from MultiPV candidates
+function selectMoveByStyle(candidates, bestMove) {
+    // Filter valid candidates (non-null)
+    const validCandidates = candidates.filter(c => c && c.move);
+    if (validCandidates.length === 0) return bestMove;
+    
+    const topScore = validCandidates[0].score;
+    
+    // Define acceptable score loss based on skill (weaker bots can deviate more)
+    let maxScoreLoss;
+    if (botElo < 1200) {
+        maxScoreLoss = 150; // Can play moves up to 1.5 pawns worse
+    } else if (botElo < 1600) {
+        maxScoreLoss = 80;  // Up to 0.8 pawns worse
+    } else if (botElo < 2000) {
+        maxScoreLoss = 40;  // Up to 0.4 pawns worse
+    } else {
+        maxScoreLoss = 20;  // Only 0.2 pawns worse for strong bots
+    }
+    
+    // Filter candidates within acceptable score range
+    const acceptableMoves = validCandidates.filter(c => 
+        (topScore - c.score) <= maxScoreLoss
+    );
+    
+    if (acceptableMoves.length <= 1) {
+        return acceptableMoves[0]?.move || bestMove;
+    }
+    
+    switch (botStyle) {
+        case 'greedy': {
+            // Prefer captures, especially winning ones
+            const captures = acceptableMoves.filter(c => c.isCapture);
+            if (captures.length > 0) {
+                // Sort by score (best capture)
+                captures.sort((a, b) => b.score - a.score);
+                return captures[0].move;
+            }
+            // No captures available, play the safest (best scored) move
+            return acceptableMoves[0].move;
+        }
+        
+        case 'tactical': {
+            // Prefer captures and active moves, willing to sacrifice
+            const captures = acceptableMoves.filter(c => c.isCapture);
+            if (captures.length > 0) {
+                // Pick a capture, even if slightly worse (within limits)
+                return captures[Math.floor(Math.random() * Math.min(2, captures.length))].move;
+            }
+            // Add some randomness among top moves to create "chaos"
+            const topMoves = acceptableMoves.slice(0, Math.min(3, acceptableMoves.length));
+            return topMoves[Math.floor(Math.random() * topMoves.length)].move;
+        }
+        
+        case 'positional': {
+            // Avoid captures when possible, prefer quiet moves
+            const quietMoves = acceptableMoves.filter(c => !c.isCapture);
+            if (quietMoves.length > 0) {
+                // Play the best quiet move
+                return quietMoves[0].move;
+            }
+            // Must capture, play the best one
+            return acceptableMoves[0].move;
+        }
+        
+        default:
+            // Neutral: just play the best move
+            return acceptableMoves[0].move;
+    }
+}
+
 // Restart engine (terminate old, create new)
 function restartEngine() {
     return new Promise((resolve, reject) => {
@@ -151,6 +316,7 @@ function restartEngine() {
             engine.terminate();
             engine = null;
             engineInitialized = false;
+            engineCalculating = false; // Reset calculation flag
         }
         
         initializeStockfish()
@@ -177,11 +343,11 @@ function toggleEngine() {
         bar.classList.remove('hidden');
     } else {
         bar.classList.add('hidden');
-        sendEngineCommand('stop');
+        stopEngineCalculation();
     }
 }
 
-function startEvaluation() {
+async function startEvaluation() {
     // If full analysis (MultiPV) is active, do not start the simple evaluation
     // as it will interrupt the analysis 'go' command and prevent results.
     if (analysisActive) {
@@ -190,7 +356,10 @@ function startEvaluation() {
     }
 
     if (!isEngineRunning || !engine) return;
-    sendEngineCommand('stop');
+    
+    // Stop any ongoing calculation before starting new one
+    await stopEngineCalculation();
+    
     sendEngineCommand('position fen ' + game.fen());
     sendEngineCommand('go depth 15');
 }
@@ -219,8 +388,33 @@ function updateEloDisplay(val) {
     document.getElementById('elo-display').innerText = val;
 }
 
+function selectBotStyle(style) {
+    botStyle = style;
+    
+    // Update button states
+    document.querySelectorAll('.bot-style-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.style === style);
+    });
+    
+    // Update description with concrete behaviors
+    const descriptions = {
+        'neutral': 'Ausgewogener Spielstil. Spielt den objektiv besten Zug.',
+        'greedy': 'Schlägt gerne Figuren und vermeidet Abtäusche bei Materialvorteil. Nimmt selten Opfer an.',
+        'tactical': 'Sucht Schachs, Angriffe und Opfer. Bevorzugt offene Linien und aktive Figuren.',
+        'positional': 'Vermeidet Schlagzüge wenn möglich. Baut langsam auf und verbessert Figurenstellung.'
+    };
+    document.getElementById('bot-style-description').innerText = descriptions[style] || descriptions['neutral'];
+}
+
 function launchBotGame() {
     if (!selectedBotLine) return;
+    
+    const styleNames = {
+        'neutral': '',
+        'greedy': 'Materialist',
+        'tactical': 'Taktiker',
+        'positional': 'Stratege'
+    };
     
     const startGame = () => {
         game.load_pgn(selectedBotLine.pgn);
@@ -228,6 +422,7 @@ function launchBotGame() {
         board.orientation(currentSide);
         document.getElementById('eval-bar-container').classList.add('hidden');
         document.getElementById('bot-play-elo').innerText = `(${botElo})`;
+        document.getElementById('bot-play-style').innerText = styleNames[botStyle] || '';
         mode = 'bot';
         botGameActive = true;
         isBotThinking = false;
@@ -260,7 +455,7 @@ function launchBotGame() {
     }
 }
 
-function makeBotMove() {
+async function makeBotMove() {
     if (!botGameActive || !engine) return;
     if (game.game_over()) return;
     
@@ -298,7 +493,9 @@ function makeBotMove() {
         moveTime = 800;
     }
     
-    sendEngineCommand('stop');
+    // Stop any ongoing calculation before starting bot move calculation
+    await stopEngineCalculation();
+    
     sendEngineCommand(`setoption name Skill Level value ${clampedSkill}`);
     
     // Add UCI Elo option for better strength calibration
@@ -309,8 +506,35 @@ function makeBotMove() {
         sendEngineCommand(`setoption name UCI_LimitStrength value false`);
     }
     
+    // Apply style-specific UCI options
+    switch (botStyle) {
+        case 'greedy':
+            sendEngineCommand('setoption name Contempt value 50');
+            break;
+        case 'tactical':
+            sendEngineCommand('setoption name Contempt value -30');
+            break;
+        case 'positional':
+            sendEngineCommand('setoption name Contempt value 20');
+            break;
+        default:
+            sendEngineCommand('setoption name Contempt value 0');
+    }
+    
     sendEngineCommand('position fen ' + game.fen());
-    sendEngineCommand(`go movetime ${moveTime}`);
+    
+    // For non-neutral styles, use MultiPV to get candidate moves for style-based selection
+    if (botStyle !== 'neutral') {
+        botMultiPvMoves = [];
+        botWaitingForStyleMove = true;
+        sendEngineCommand('setoption name MultiPV value 5');
+        sendEngineCommand(`go movetime ${moveTime}`);
+    } else {
+        // Neutral style: just play the engine's best move
+        botWaitingForStyleMove = false;
+        sendEngineCommand('setoption name MultiPV value 1');
+        sendEngineCommand(`go movetime ${moveTime}`);
+    }
 }
 
 function updateBotStatus(msg, type) {
