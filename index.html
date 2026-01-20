@@ -2,9 +2,9 @@
 <html lang="de">
 <head>
 
-    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="static/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="static/favicon-16x16.png">
     <link rel="manifest" href="site.webmanifest">
     
     <meta charset="UTF-8">
@@ -56,6 +56,9 @@
                     <button class="color-btn active" onclick="setSide('white')">Weiß</button>
                     <button class="color-btn" onclick="setSide('black')">Schwarz</button>
                 </div>
+                <button class="mobile-board-toggle" id="mobile-board-toggle" onclick="toggleMobileBoard()" title="Brett anzeigen">
+                    <i class="fas fa-chess-board"></i>
+                </button>
                 <button class="analyze-btn" onclick="toggleEvalBar()" id="btn-eval-bar" title="Bewertung anzeigen">
                     <i class="fas fa-search"></i>
                 </button>
@@ -267,6 +270,28 @@
                     <button class="analyze-btn" onclick="toggleDatabaseMenu()" id="btn-database">
                         <i class="fas fa-database"></i> Datenbank
                     </button>
+                    <div class="arrow-btn-wrapper">
+                        <button class="analyze-btn mobile-arrow-btn" onclick="toggleArrowDrawMode()" id="btn-arrow-draw" title="Pfeile zeichnen">
+                            <i class="fas fa-long-arrow-alt-right"></i>
+                        </button>
+                        <div class="arrow-color-popup hidden" id="arrow-color-popup">
+                            <button class="arrow-color-btn active" data-color="green" onclick="setArrowColor('green'); event.stopPropagation();" style="background:#22c55e"></button>
+                            <button class="arrow-color-btn" data-color="red" onclick="setArrowColor('red'); event.stopPropagation();" style="background:#ef4444"></button>
+                            <button class="arrow-color-btn" data-color="blue" onclick="setArrowColor('blue'); event.stopPropagation();" style="background:#3b82f6"></button>
+                            <button class="arrow-color-btn" data-color="yellow" onclick="setArrowColor('yellow'); event.stopPropagation();" style="background:#eab308"></button>
+                        </div>
+                    </div>
+                    <div class="arrow-btn-wrapper">
+                        <button class="analyze-btn mobile-arrow-btn" onclick="toggleCircleDrawMode()" id="btn-circle-draw" title="Kreise zeichnen">
+                            <i class="far fa-circle"></i>
+                        </button>
+                        <div class="arrow-color-popup hidden" id="circle-color-popup">
+                            <button class="arrow-color-btn active" data-color="green" onclick="setCircleColor('green'); event.stopPropagation();" style="background:#22c55e"></button>
+                            <button class="arrow-color-btn" data-color="red" onclick="setCircleColor('red'); event.stopPropagation();" style="background:#ef4444"></button>
+                            <button class="arrow-color-btn" data-color="blue" onclick="setCircleColor('blue'); event.stopPropagation();" style="background:#3b82f6"></button>
+                            <button class="arrow-color-btn" data-color="yellow" onclick="setCircleColor('yellow'); event.stopPropagation();" style="background:#eab308"></button>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -335,7 +360,19 @@
         </div>
 
         <div id="selection-mode" class="hidden">
-            <h2 class="selection-mode-header">Training Auswahl</h2>
+            <div class="selection-mode-header">
+                <div class="color-switch">
+                    <button class="color-btn active" onclick="setSide('white')">Weiß</button>
+                    <button class="color-btn" onclick="setSide('black')">Schwarz</button>
+                </div>
+                <button class="mobile-board-toggle" onclick="toggleMobileBoard()" title="Brett anzeigen">
+                    <i class="fas fa-chess-board"></i>
+                </button>
+            </div>
+            <div id="selection-search-banner" class="search-banner hidden">
+                <span><i class="fas fa-filter search-filter-icon"></i> Filter aktiv</span>
+                <button onclick="resetSelectionBoardSearch()">Reset</button>
+            </div>
             <input type="search" id="search-input" placeholder="Suche..." oninput="renderSelectionList()">
             <div id="selection-list" class="scrollable-list"></div>
             <div class="action-group">
@@ -462,6 +499,7 @@
 </div>
 
 <script src="stockfish-wrapper.js"></script>
+<script src="board.js"></script>
 <script src="script.js"></script>
 <script>
   // Initialize Stockfish when page loads

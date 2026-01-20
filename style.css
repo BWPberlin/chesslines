@@ -8,7 +8,7 @@
     --resizer-bg: #475569;
     --add-mode-gap: 8px; /* unified spacing for create-line (add) mode (reduced) */
 }
-
+^
 body.light-mode {
     --bg-body: #f8fafc; --bg-panel: #ffffff; --bg-input: #f1f5f9; --bg-hover: #e2e8f0;
     --text-main: #0f172a; --text-muted: #64748b; --border-color: #e2e8f0;
@@ -42,9 +42,10 @@ textarea::placeholder {
 
 /* Container für Balken + Brett */
 .board-wrapper {
-    display: flex; gap: 10px; height: 100%; width: 100%; position: relative; z-index: 10;
+    display: flex; gap: 10px; width: 100%; position: relative; z-index: 10;
     max-width: 85vh; max-height: 85vh; align-items: stretch; justify-content: center;
     position: relative; /* Wichtig für SVG Overlay und Eval Bar */
+    aspect-ratio: 1 / 1; /* Match board's aspect ratio */
 }
 
 #board {
@@ -52,6 +53,7 @@ textarea::placeholder {
     box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
     flex-shrink: 1;
     z-index: 1; /* Unter dem SVG */
+    position: relative; /* For eval bar positioning */
 }
 
 /* Board uses default corners */
@@ -68,6 +70,7 @@ textarea::placeholder {
     top: 0; left: 0; width: 100%; height: 100%;
     pointer-events: none; /* Klicks gehen durch */
     z-index: 1000; /* Über den Figuren */
+    shape-rendering: geometricPrecision; /* Smooth anti-aliased edges */
 }
 
 /* WICHTIG: Damit Bilder immer sichtbar sind */
@@ -117,7 +120,8 @@ textarea::placeholder {
 #eval-bar-container {
     width: 30px; background: #333; 
     border-radius: 4px; overflow: hidden; position: absolute;
-    left: -40px; top: 0; bottom: 0;
+    left: -40px; top: 0;
+    height: 100%;
     box-shadow: inset 0 0 5px rgba(0,0,0,0.5);
     transition: opacity 0.3s;
     display: flex; flex-direction: column; justify-content: flex-end;
@@ -314,7 +318,23 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
 .color-dot { width: 20px; height: 20px; border-radius: 50%; display: inline-block; }
 .view-mode-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: var(--add-mode-gap); flex-shrink: 0; }
 .view-mode-header .color-switch { margin-bottom: 0; flex: 1; }
-.view-mode-header .analyze-btn { padding: 10px 12px; }
+.view-mode-header .analyze-btn { 
+    padding: 10px 12px; 
+    background: var(--bg-input);
+    border: none;
+    border-radius: 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.view-mode-header .analyze-btn:hover,
+.view-mode-header .analyze-btn.active {
+    background: var(--primary);
+    color: var(--primary-text);
+}
 .color-switch { display: flex; background: var(--bg-input); border-radius: var(--radius); padding: 4px; margin-bottom: var(--add-mode-gap); flex-shrink: 0; }
 .color-btn { flex: 1; background: transparent; border: none; color: var(--text-muted); padding: 10px; cursor: pointer; font-weight: 600; border-radius: 6px; font-size: 0.95rem; }
 .color-btn.active { background-color: var(--bg-panel); color: var(--text-main); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -539,29 +559,56 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
     font-size: 0.95rem;
 }
 
+/* Mobile board toggle button - hidden on desktop */
+.mobile-board-toggle {
+    display: none;
+}
+
 /* Mobile layout: board on top, menu below, avoid page scroll */
 @media (max-width: 768px) {
     body { overflow: hidden; }
     .main-container { flex-direction: column; padding: 8px; height: 100vh; }
 
+    /* Hide board by default on mobile in view mode */
     .board-area {
-        flex: 0 0 50vh;
+        flex: 0 0 0;
         min-width: 100%;
-        display: flex;
+        display: none;
         align-items: center;
         justify-content: center;
         padding: 6px;
         order: 0;
-        overflow: hidden; /* prevent board growing beyond its area */
+        overflow: hidden;
+        transition: flex-basis 0.3s ease, opacity 0.3s ease;
+    }
+
+    /* Show board when toggled */
+    .board-area.mobile-visible {
+        display: flex;
+        flex: 0 0 45vh;
     }
 
     .board-wrapper {
         max-width: 100%;
         max-height: 100%;
-        width: 100%;
+        width: auto;
         height: 100%;
         align-items: center;
         justify-content: center;
+        position: relative;
+        margin: 0 auto;
+    }
+
+    /* Mobile eval bar positioning - inside the visible area */
+    #eval-bar-container {
+        left: -33px;
+        width: 28px;
+        overflow: visible;
+    }
+
+    #eval-score {
+        font-size: 10px;
+        white-space: nowrap;
     }
 
     #board {
@@ -580,33 +627,119 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
         flex: 1 1 auto;
         min-width: 100%;
         order: 1;
-        height: calc(100vh - 50vh - 16px);
+        height: 100%;
         padding: 12px;
-        /* leave space for the fixed action bar */
-        padding-bottom: calc(92px + env(safe-area-inset-bottom));
+        padding-bottom: calc(70px + env(safe-area-inset-bottom));
         overflow: auto;
+    }
+
+    /* When board is visible, adjust controls area */
+    .board-area.mobile-visible ~ .controls-area {
+        height: calc(100vh - 45vh - 16px);
+    }
+
+    /* Mobile board toggle button */
+    .mobile-board-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        background: var(--bg-input);
+        border: none;
+        border-radius: 8px;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        flex-shrink: 0;
+    }
+
+    .mobile-board-toggle:hover,
+    .mobile-board-toggle.active {
+        background: var(--primary);
+        color: var(--primary-text);
+    }
+
+    .mobile-board-toggle i {
+        font-size: 1rem;
+    }
+
+    /* Hide analyze button when board is hidden on mobile */
+    .view-mode-header .analyze-btn {
+        display: none;
+    }
+
+    /* Show analyze button when board is visible */
+    .board-area.mobile-visible ~ .controls-area .view-mode-header .analyze-btn {
+        display: flex;
+        padding: 8px 10px;
+        width: 40px;
+        height: 40px;
+    }
+
+    /* Compact view-mode header */
+    .view-mode-header,
+    .selection-mode-header {
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .view-mode-header .color-switch,
+    .selection-mode-header .color-switch {
+        padding: 3px;
+    }
+
+    .color-btn {
+        padding: 8px 12px;
+        font-size: 0.85rem;
     }
 
     /* Make key UI elements more compact on small screens */
     .training-card { padding: 16px; }
-    .header-row { padding: 12px 16px; }
-    .action-group { gap: 8px; }
+    .header-row { padding: 10px 14px; }
+    h2 { font-size: 1rem; }
+    .action-group { gap: 6px; }
+
+    /* Compact action buttons */
+    .action-btn {
+        padding: 10px 14px;
+        font-size: 0.85rem;
+        gap: 6px;
+    }
 
     /* Ensure overlays scale on mobile */
     .training-results-overlay .results-card { max-width: 95%; padding: 20px; }
+    
     /* Make lists inside controls scroll independently and only when needed */
     .controls-area .scrollable-list,
     #lines-list,
     #selection-list,
     .settings-container {
-        max-height: calc(100vh - 50vh - 140px);
+        max-height: calc(100vh - 160px);
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+        padding-bottom: 60px; /* Space for absolute positioned buttons */
+    }
+
+    /* When board is visible, reduce list height */
+    .board-area.mobile-visible ~ .controls-area .scrollable-list,
+    .board-area.mobile-visible ~ .controls-area #lines-list,
+    .board-area.mobile-visible ~ .controls-area #selection-list {
+        max-height: calc(55vh - 140px);
     }
 
     /* Hide the clear-shapes button when creating a new line on phones */
     #add-mode .clear-shapes-btn { display: none; }
 
+    /* Show mobile arrow drawing button on small screens */
+    .arrow-btn-wrapper {
+        display: flex !important;
+        position: relative;
+    }
+    .arrow-btn-wrapper .mobile-arrow-btn {
+        display: flex !important;
+        padding: 8px 10px;
+    }
     /* Enable touch dragging on the board and pieces */
     #board { touch-action: none; -ms-touch-action: none; }
     #board img { -webkit-user-drag: none; touch-action: none; }
@@ -634,21 +767,41 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
 
     /* Center the primary view buttons and keep them static (not in fixed bottom bar) */
     #view-mode .action-group,
-    #add-mode .action-group {
-        position: relative !important;
-        left: auto !important;
-        right: auto !important;
-        bottom: auto !important;
+    #add-mode .action-group,
+    #selection-mode .action-group,
+    #import-pgn-mode .action-group,
+    #bot-setup-mode .action-group {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: calc(16px + env(safe-area-inset-bottom));
         display: flex;
         justify-content: center;
-        gap: 10px;
-        margin-top: var(--add-mode-gap);
+        gap: 6px;
+        margin-top: 0;
         padding: 0;
+        background: none;
+        backdrop-filter: none;
     }
 
-    /* Ensure the fixed bottom action bar doesn't cover these modes */
+    /* Compact action buttons in view mode */
     #view-mode .action-group .action-btn,
-    #add-mode .action-group .action-btn { min-width: 120px; }
+    #add-mode .action-group .action-btn,
+    #selection-mode .action-group .action-btn,
+    #import-pgn-mode .action-group .action-btn,
+    #bot-setup-mode .action-group .action-btn { 
+        min-width: 90px;
+        flex: 1;
+    }
+
+    /* Show board when in add/train/bot modes on mobile */
+    body:has(#add-mode:not(.hidden)) .board-area,
+    body:has(#train-mode:not(.hidden)) .board-area,
+    body:has(#bot-play-mode:not(.hidden)) .board-area,
+    body:has(#bot-setup-mode:not(.hidden)) .board-area {
+        display: flex !important;
+        flex: 0 0 45vh !important;
+    }
 }
 
 /* Add-mode scrolling and limits (all screens) so played moves and notes remain visible */
@@ -664,29 +817,6 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
 /* Ensure action buttons in add mode always have gap to content above */
 #add-mode .action-group { margin-top: var(--add-mode-gap); }
 
-/* Mobile fixed action bar: keep bottom buttons always reachable */
-@media (max-width: 768px) {
-    .action-group {
-        position: fixed;
-        left: 12px;
-        right: 12px;
-        bottom: calc(12px + env(safe-area-inset-bottom));
-        display: flex;
-        gap: 8px;
-        padding: 8px;
-        z-index: 1000;
-        background: linear-gradient(180deg, rgba(0,0,0,0.0), rgba(0,0,0,0.06));
-        border-radius: 12px;
-        backdrop-filter: blur(6px);
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    .action-group .action-btn {
-        flex: 0 0 auto;
-        min-width: 110px;
-    }
-}
 /* Ensure training card is centered on larger screens (override earlier rules) */
 @media (min-width: 1024px) {
     #train-mode .training-dashboard { justify-content: center !important; align-items: center !important; }
@@ -1180,9 +1310,66 @@ input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; c
 
 /* Selection mode header */
 .selection-mode-header {
-    font-size: 1.1rem;
-    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: var(--add-mode-gap);
     flex-shrink: 0;
+}
+.selection-mode-header .color-switch {
+    margin-bottom: 0;
+    flex: 1;
+}
+
+/* Arrow button wrapper for popup positioning - hidden on desktop */
+.arrow-btn-wrapper {
+    position: relative;
+    display: none;
+}
+
+/* Mobile arrow drawing button - shown via media query */
+.mobile-arrow-btn.active {
+    background: var(--primary) !important;
+    color: var(--primary-text) !important;
+}
+
+/* Arrow color popup */
+.arrow-color-popup {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 8px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 8px;
+    display: flex;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    z-index: 100;
+}
+.arrow-color-popup.hidden {
+    display: none;
+}
+.arrow-color-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.arrow-color-btn:hover {
+    transform: scale(1.1);
+}
+.arrow-color-btn.active {
+    border-color: var(--text-main);
+}
+
+/* Arrow draw mode highlight for first selected square */
+.arrow-draw-start {
+    box-shadow: inset 0 0 0 4px var(--primary) !important;
 }
 
 /* Bot accuracy stat */
