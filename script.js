@@ -473,6 +473,7 @@ function renderList(filterPgn = null) {
                 return a.pgn.length - b.pgn.length; // Default simple sort
             });
 
+            const fragment = document.createDocumentFragment();
             groups[cat].forEach(line => {
                 const div = document.createElement('div'); 
                 const isInRepetition = cat !== REPETITION_CAT && repetitionPgns.has(line.pgn);
@@ -492,8 +493,9 @@ function renderList(filterPgn = null) {
                         <button onclick="editLine(${line.id})"><i class="fas fa-pen"></i></button>
                         <button class="del" onclick="deleteLine(${line.id})"><i class="fas fa-trash"></i></button>
                     </div>`;
-                contentDiv.appendChild(div);
+                fragment.appendChild(div);
             });
+            contentDiv.appendChild(fragment);
         }
         
         groupDiv.appendChild(contentDiv); 
